@@ -1,0 +1,65 @@
+## Project Architecture Overview
+
+Based on the requirements, here's what we need to build:
+
+**Core Features:**
+1. Google OAuth for calendar integration
+2. Multiple Google account support
+3. Calendar event display with toggle switches
+4. Recall.ai integration for meeting recording
+5. Meeting transcript processing
+6. AI-powered content generation
+7. Social media OAuth (LinkedIn, Facebook)
+8. Post scheduling and publishing
+9. Settings and automation configuration
+
+## Recommended Tech Stack
+
+**Frontend:** Next.js 14 with TypeScript
+**Backend:** Next.js API routes
+**Database:** PostgreSQL with Prisma ORM
+**Authentication:** NextAuth.js
+**Deployment:** Vercel
+**AI:** OpenAI GPT-4 for content generation
+
+## Step-by-Step Development Plan
+
+### Phase 1: Setup & Authentication (Hours 1-6)
+1. Initialize Next.js project with TypeScript
+2. Set up database schema with Prisma
+3. Implement Google OAuth with NextAuth.js
+4. Create basic UI with calendar integration
+5. Deploy to Vercel for testing
+
+### Phase 2: Calendar & Meeting Management (Hours 7-18)
+1. Google Calendar API integration
+2. Multiple account support
+3. Meeting list UI with toggle switches
+4. Recall.ai bot scheduling system
+5. Polling mechanism for transcript retrieval
+
+### Phase 3: AI Content Generation (Hours 19-30)
+1. Transcript processing
+2. OpenAI integration for post generation
+3. Follow-up email generation
+4. Automation system setup
+
+### Phase 4: Social Media Integration (Hours 31-42)
+1. LinkedIn OAuth integration
+2. Facebook OAuth integration
+3. Post publishing functionality
+4. Settings page with automation configs
+
+### Phase 5: Polish & Testing (Hours 43-48)
+1. UI/UX improvements
+2. Error handling
+3. Final testing and bug fixes
+
+Would you like me to start by creating the initial project structure and database schema? I can provide you with the complete code for each component as we go through this systematically.
+
+Also, do you have access to:
+- Recall.ai API key
+- OpenAI API key
+- LinkedIn/Facebook developer accounts for OAuth setup
+
+Let me know and I'll begin with the foundational code!
