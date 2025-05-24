@@ -1,4 +1,4 @@
-// prisma/schema.prisma
+// prisma/schema.prisma - Updated for Phase 2
 generator client {
   provider = "prisma-client-js"
 }
@@ -44,7 +44,7 @@ model User {
   accounts      Account[]
   sessions      Session[]
   
-  // App-specific fields (simple for Phase 1)
+  // App-specific fields
   meetings      Meeting[]
   
   createdAt     DateTime @default(now())
@@ -56,16 +56,28 @@ model Meeting {
   userId            String
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  // Basic meeting info
+  // Google Calendar data
   calendarEventId   String?
   title             String
+  description       String?
   startTime         DateTime
-  meetingUrl        String?
-  platform          String?
+  endTime           DateTime?
+  attendees         Json?    // Array of attendee objects
+  meetingUrl        String?  // Zoom/Teams/Meet URL
+  platform          String?  // 'zoom', 'teams', 'meet', 'webex'
+  
+  // Recall.ai data (Phase 2 additions)
+  recallBotId       String?
+  recallBotStatus   String?  // 'scheduled', 'joining', 'in_call', 'call_ended', 'done'
+  
+  // Settings
   noteTakerEnabled  Boolean  @default(false)
   
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+  
+  // Ensure unique combination of user and calendar event
+  @@unique([userId, calendarEventId])
 }
 
 model VerificationToken {

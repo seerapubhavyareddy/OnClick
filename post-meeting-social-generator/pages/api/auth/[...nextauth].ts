@@ -1,4 +1,4 @@
-// pages/api/auth/[...nextauth].ts
+// pages/api/auth/[...nextauth].ts - with detailed logging
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
@@ -12,12 +12,24 @@ export const authOptions: NextAuthOptions = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
       authorization: {
         params: {
-          scope: 'openid email profile https://www.googleapis.com/auth/calendar.readonly',
+          scope: 'openid email profile https://www.googleapis.com/auth/calendar.readonly'
         },
       },
     }),
   ],
   callbacks: {
+    async signIn({ user, account, profile }) {
+      console.log('🔑 SignIn callback triggered')
+      console.log('👤 User:', { id: user.id, email: user.email, name: user.name })
+      console.log('🔗 Account:', { 
+        provider: account?.provider, 
+        providerAccountId: account?.providerAccountId,
+        type: account?.type,
+        access_token: account?.access_token ? 'exists' : 'missing'
+      })
+      console.log('📝 Profile:', { id: profile?.sub, email: profile?.email })
+      return true
+    },
     async session({ session, user }) {
       return {
         ...session,
@@ -28,9 +40,15 @@ export const authOptions: NextAuthOptions = {
       }
     },
   },
-//   pages: {
-//     signIn: '/auth/signin',
-//   },
+  events: {
+    async createUser(message) {
+      console.log('👤 User created:', message.user.email)
+    },
+    async linkAccount(message) {
+      console.log('🔗 Account linked:', message.account.provider, 'to user:', message.user.email)
+    },
+  },
+  debug: true,
 }
 
 export default NextAuth(authOptions)
