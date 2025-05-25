@@ -57,6 +57,8 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedMeeting, setSelectedMeeting] = useState<any>(null)
+  const [generatedContent, setGeneratedContent] = useState<any>(null)
+  const [generatingContent, setGeneratingContent] = useState(false)
 
   useEffect(() => {
     if (session) {
@@ -175,6 +177,35 @@ export default function Home() {
     } catch (error) {
       console.error('Error fetching meeting transcript:', error)
     }
+  }
+
+  const generateContent = async (meetingId: string, type: string, platform?: string) => {
+    setGeneratingContent(true)
+    try {
+      const response = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, type, platform })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        setGeneratedContent(result)
+      } else {
+        const error = await response.json()
+        alert(error.error || 'Failed to generate content')
+      }
+    } catch (error) {
+      console.error('Error generating content:', error)
+      alert('Failed to generate content')
+    } finally {
+      setGeneratingContent(false)
+    }
+  }
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    alert('Content copied to clipboard!')
   }
 
   const refreshCalendarEvents = async () => {
@@ -499,6 +530,8 @@ export default function Home() {
         </div>
 
         {/* Past Meetings */}
+        {/* // Updated Past Meetings section in page.tsx - Clean UI without follow-up email */}
+
         <div className="mb-12">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-semibold text-gray-900">
@@ -547,27 +580,68 @@ export default function Home() {
                     )}
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {meeting.hasTranscript ? (
-                      <div className="bg-green-50 border border-green-200 rounded p-3">
-                        <p className="text-green-800 text-sm font-medium mb-2">
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                        <p className="text-green-800 text-sm font-medium mb-4">
                           ✓ Transcript Available
                         </p>
-                        <button
-                          onClick={() => viewMeetingTranscript(meeting.id)}
-                          className="text-blue-600 hover:text-blue-800 text-sm underline"
-                        >
-                          View Transcript
-                        </button>
+                        
+                        {/* Clean Action Grid */}
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                          <button
+                            onClick={() => viewMeetingTranscript(meeting.id)}
+                            className="flex items-center justify-center px-3 py-2 text-sm bg-white border border-green-300 text-green-700 rounded-md hover:bg-green-50 transition-colors"
+                          >
+                            📄 View Transcript
+                          </button>
+                          
+                          <button
+                            onClick={() => generateContent(meeting.id, 'summary')}
+                            disabled={generatingContent}
+                            className="flex items-center justify-center px-3 py-2 text-sm bg-white border border-green-300 text-green-700 rounded-md hover:bg-green-50 disabled:opacity-50 transition-colors"
+                          >
+                            📝 Summary
+                          </button>
+                        </div>
+
+                        {/* Social Media Posts - Full Width Buttons */}
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => generateContent(meeting.id, 'social_post', 'linkedin')}
+                            disabled={generatingContent}
+                            className="w-full flex items-center justify-center px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                          >
+                            💼 Generate LinkedIn Post
+                          </button>
+                          
+                          <button
+                            onClick={() => generateContent(meeting.id, 'social_post', 'facebook')}
+                            disabled={generatingContent}
+                            className="w-full flex items-center justify-center px-4 py-2 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                          >
+                            📘 Generate Facebook Post
+                          </button>
+                        </div>
+
+                        {generatingContent && (
+                          <div className="mt-3 flex items-center justify-center text-sm text-blue-600">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                            Generating content...
+                          </div>
+                        )}
                       </div>
                     ) : meeting.noteTakerEnabled ? (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded p-3">
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                         <p className="text-yellow-800 text-sm">
-                          ⏳ Processing transcript... Status: {meeting.recallBotStatus}
+                          ⏳ Processing transcript...
+                        </p>
+                        <p className="text-yellow-600 text-xs mt-1">
+                          Status: {meeting.recallBotStatus}
                         </p>
                       </div>
                     ) : (
-                      <div className="bg-gray-50 border border-gray-200 rounded p-3">
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                         <p className="text-gray-600 text-sm">
                           📋 No bot was enabled for this meeting
                         </p>
@@ -587,6 +661,97 @@ export default function Home() {
             </div>
           )}
         </div>
+{/* // Updated Content Generation Modal - Replace in page.tsx */}
+
+        {/* Content Generation Modal */}
+        {generatedContent && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-semibold text-gray-900">
+                      {generatedContent.type === 'social_post' ? 'Draft Post' :
+                      generatedContent.type === 'summary' ? 'Meeting Summary' : 'Generated Content'}
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {generatedContent.type === 'social_post' && 
+                        `Generate a post based on insights from this meeting.`
+                      }
+                      {generatedContent.type === 'summary' && 
+                        `Summary of: ${generatedContent.meetingTitle}`
+                      }
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setGeneratedContent(null)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-6 w-6" />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="p-6 overflow-y-auto max-h-[60vh]">
+                <div className="space-y-4">
+                  <div className="bg-gray-50 rounded-lg p-4 min-h-[200px]">
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                      {generatedContent.content}
+                    </div>
+                  </div>
+                  
+                  {/* Show disclaimer only for social posts */}
+                  {generatedContent.type === 'social_post' && (
+                    <p className="text-xs text-gray-500 italic">
+                      The views expressed are for informational purposes only and do not constitute financial advice. 
+                      Past performance is no guarantee of future results.
+                    </p>
+                  )}
+                  
+                  <div className="flex justify-between items-center">
+                    <div className="text-sm text-gray-500">
+                      {generatedContent.type === 'social_post' && (
+                        <span className="inline-flex items-center px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                          {generatedContent.platform?.charAt(0).toUpperCase() + generatedContent.platform?.slice(1)} Post
+                        </span>
+                      )}
+                      {generatedContent.type === 'summary' && (
+                        <span className="inline-flex items-center px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-medium">
+                          Meeting Summary
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="flex space-x-3">
+                      <button
+                        onClick={() => copyToClipboard(generatedContent.content)}
+                        className="flex items-center px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        📋 Copy
+                      </button>
+                      
+                      {generatedContent.type === 'social_post' && (
+                        <button
+                          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                          onClick={() => alert('Connect LinkedIn/Facebook first to post! (Phase 4 feature)')}
+                        >
+                          📤 Post
+                        </button>
+                      )}
+                      
+                      <button
+                        onClick={() => setGeneratedContent(null)}
+                        className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Transcript Modal */}
         {selectedMeeting && (
