@@ -1,4 +1,4 @@
-// pages/api/auth/[...nextauth].ts - with detailed logging
+// pages/api/auth/[...nextauth].ts - with offline access for refresh tokens
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
@@ -12,7 +12,9 @@ export const authOptions: NextAuthOptions = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
       authorization: {
         params: {
-          scope: 'openid email profile https://www.googleapis.com/auth/calendar.readonly'
+          scope: 'openid email profile https://www.googleapis.com/auth/calendar.readonly',
+          access_type: 'offline',  // This is crucial for refresh tokens
+          prompt: 'consent',       // Forces consent screen to get refresh token
         },
       },
     }),
@@ -25,7 +27,8 @@ export const authOptions: NextAuthOptions = {
         provider: account?.provider, 
         providerAccountId: account?.providerAccountId,
         type: account?.type,
-        access_token: account?.access_token ? 'exists' : 'missing'
+        access_token: account?.access_token ? 'exists' : 'missing',
+        refresh_token: account?.refresh_token ? 'exists' : 'missing'  // Log this too
       })
       console.log('📝 Profile:', { id: profile?.sub, email: profile?.email })
       return true
@@ -46,6 +49,7 @@ export const authOptions: NextAuthOptions = {
     },
     async linkAccount(message) {
       console.log('🔗 Account linked:', message.account.provider, 'to user:', message.user.email)
+      console.log('🔑 Refresh token present:', !!message.account.refresh_token)
     },
   },
   debug: true,

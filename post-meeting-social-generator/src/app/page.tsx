@@ -64,6 +64,14 @@ export default function Home() {
       fetchPastMeetings()
       fetchPollingStats()
       startPollingService()
+      
+      // Check token status and refresh if needed
+      checkAndRefreshTokens()
+      
+      // Set up token refresh interval (every 30 minutes)
+      const tokenRefreshInterval = setInterval(checkAndRefreshTokens, 30 * 60 * 1000)
+      
+      return () => clearInterval(tokenRefreshInterval)
     }
   }, [session])
 
@@ -125,6 +133,30 @@ export default function Home() {
       })
     } catch (error) {
       console.error('Error starting polling service:', error)
+    }
+  }
+
+  const checkAndRefreshTokens = async () => {
+    try {
+      const response = await fetch('/api/auth/refresh-tokens')
+      const tokenStatus = await response.json()
+      
+      if (tokenStatus.isExpired || tokenStatus.expiresInMinutes < 10) {
+        console.log('🔄 Token expiring soon, refreshing...')
+        
+        const refreshResponse = await fetch('/api/auth/refresh-tokens', {
+          method: 'POST'
+        })
+        
+        if (refreshResponse.ok) {
+          console.log('✅ Token refreshed successfully')
+        } else {
+          console.error('❌ Failed to refresh token')
+          setError('Calendar access expired. Please sign out and sign in again.')
+        }
+      }
+    } catch (error) {
+      console.error('Error checking token status:', error)
     }
   }
 
