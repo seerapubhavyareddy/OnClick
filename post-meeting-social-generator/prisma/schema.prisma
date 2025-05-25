@@ -51,34 +51,45 @@ model User {
   updatedAt     DateTime @updatedAt
 }
 
+// Add these fields to your existing Meeting model in schema.prisma
+
 model Meeting {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  // Google Calendar data
-  calendarEventId   String?
+  calendarEventId   String
   title             String
   description       String?
   startTime         DateTime
   endTime           DateTime?
-  attendees         Json?    // Array of attendee objects
-  meetingUrl        String?  // Zoom/Teams/Meet URL
-  platform          String?  // 'zoom', 'teams', 'meet', 'webex'
+  attendees         Json?     // Array of attendee objects
+  meetingUrl        String?
+  platform          String?   // zoom, teams, meet, etc
   
-  // Recall.ai data (Phase 2 additions)
+  // Recall.ai bot fields
   recallBotId       String?
-  recallBotStatus   String?  // 'scheduled', 'joining', 'in_call', 'call_ended', 'done'
+  recallBotStatus   String?   // scheduled, joining, in_call, done, failed, etc
+  pollRetries       Int       @default(0)
+  lastPolledAt      DateTime?
   
-  // Settings
-  noteTakerEnabled  Boolean  @default(false)
+  // NEW: Transcript fields for Phase 2
+  transcript        Json?     // Raw transcript from Recall.ai
+  transcriptText    String?   // Formatted transcript text
+  videoUrl          String?
   
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  // Status fields
+  noteTakerEnabled  Boolean   @default(false)
+  completedAt       DateTime?
+  lastError         String?
   
-  // Ensure unique combination of user and calendar event
+  // Relations
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
   @@unique([userId, calendarEventId])
 }
+
 
 model VerificationToken {
   identifier String

@@ -4,6 +4,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../../../pages/api/auth/[...nextauth]'
 import { prisma } from '../../../../../lib/prisma'
 import { getCalendarClientForUser } from '../../../../../lib/google-calendar'
+import { recallClient } from '../../../../../lib/recall-client'
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,7 +20,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
 
-    // Get user from database
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
     })
@@ -28,7 +28,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Get calendar client to fetch event details
     const calendarClient = await getCalendarClientForUser(user.id)
     
     if (!calendarClient) {
@@ -60,7 +59,6 @@ export async function POST(request: NextRequest) {
       },
       update: {
         noteTakerEnabled: enabled,
-        // Update meeting details in case they changed
         title: event.summary,
         startTime: new Date(event.start.dateTime),
         endTime: event.end?.dateTime ? new Date(event.end.dateTime) : undefined,
@@ -82,21 +80,95 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // TODO: Phase 3 - Schedule/cancel Recall.ai bot here
-    // if (enabled && event.meetingUrl) {
-    //   // Schedule Recall bot for this meeting
-    //   console.log(`Would schedule Recall bot for meeting: ${event.summary}`)
-    // } else if (!enabled && meeting.recallBotId) {
-    //   // Cancel/disable bot
-    //   console.log(`Would cancel Recall bot for meeting: ${event.summary}`)
-    // }
+    // Handle Recall.ai bot scheduling
+    if (enabled && event.meetingUrl) {
+      try {
+        console.log(`🤖 Scheduling Recall bot for meeting: ${event.summary}`)
+        
+        // Calculate join time (5 minutes before meeting starts)
+        const meetingStart = new Date(event.start.dateTime)
+        const joinTime = new Date(meetingStart.getTime() - 5 * 60 * 1000) // 5 minutes early
+        
+        // Create Recall bot
+        const bot = await recallClient.createBot({
+          meeting_url: event.meetingUrl,
+          join_at: joinTime.toISOString(),
+          bot_name: `${user.name || 'Assistant'}'s Note Taker`,
+          recording_mode: 'speaker_view',
+          transcription_options: {
+            provider: 'deepgram' // or 'assembly_ai', 'meeting_captions'
+          }
+        })
+
+        // Get the initial bot status from status_changes
+        const initialStatus = bot.status_changes && bot.status_changes.length > 0 
+        ? bot.status_changes[bot.status_changes.length - 1]?.code
+        : 'ready'
+
+        // Update meeting with bot information
+        await prisma.meeting.update({
+        where: { id: meeting.id },
+        data: {
+            recallBotId: bot.id,
+            recallBotStatus: initialStatus, // Use status from status_changes
+        }
+        })
+
+        console.log(`✅ Recall bot scheduled: ${bot.id} for meeting: ${event.summary}`)
+
+        return NextResponse.json({ 
+        success: true, 
+        enabled,
+        meetingId: meeting.id,
+        botId: bot.id,
+        botStatus: initialStatus, // Return the actual status
+        message: `Note taker bot scheduled for "${event.summary}"`
+        })
+      } catch (error) {
+        console.error('❌ Error creating Recall bot:', error)
+        
+        // Still save the meeting preference even if bot creation fails
+        await prisma.meeting.update({
+          where: { id: meeting.id },
+          data: { recallBotStatus: 'failed' }
+        })
+        
+        return NextResponse.json({ 
+          success: true, 
+          enabled,
+          meetingId: meeting.id,
+          error: 'Bot scheduling failed, but preference saved',
+          message: `Preference saved for "${event.summary}", but bot scheduling failed`
+        })
+      }
+    } else if (!enabled && meeting.recallBotId) {
+      try {
+        console.log(`🗑️ Cancelling Recall bot: ${meeting.recallBotId}`)
+        
+        // Try to delete the bot (if it exists and hasn't started yet)
+        await recallClient.deleteBot(meeting.recallBotId)
+        
+        // Update meeting to remove bot info
+        await prisma.meeting.update({
+          where: { id: meeting.id },
+          data: {
+            recallBotId: null,
+            recallBotStatus: 'cancelled',
+          }
+        })
+
+        console.log(`✅ Recall bot cancelled for meeting: ${event.summary}`)
+        
+      } catch (error) {
+        console.error('❌ Error cancelling Recall bot:', error)
+        // Don't fail the request if bot deletion fails
+      }
+    }
 
     return NextResponse.json({ 
       success: true, 
       enabled,
       meetingId: meeting.id,
-      hasValidUrl: !!event.meetingUrl,
-      platform: event.platform,
       message: enabled 
         ? `Note taker enabled for "${event.summary}"` 
         : `Note taker disabled for "${event.summary}"`
