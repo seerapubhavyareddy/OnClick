@@ -1,4 +1,6 @@
 // src/app/api/polling/route.ts
+export const runtime = 'nodejs'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../../pages/api/auth/[...nextauth]'
@@ -14,12 +16,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Auto-start polling service when first accessed
+    await pollingService.startPolling()
+
     // Get polling statistics
     const activeBots = await prisma.meeting.count({
       where: {
         recallBotId: { not: null },
         recallBotStatus: {
-          in: ['scheduled', 'joining', 'in_call']
+          in: ['ready', 'joining_call', 'in_waiting_room', 'in_call_not_recording', 'in_call_recording']
         }
       }
     })

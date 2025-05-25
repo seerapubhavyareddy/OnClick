@@ -1,4 +1,5 @@
 // src/app/api/auth/refresh-tokens/route.ts
+export const runtime = 'nodejs'
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../../../pages/api/auth/[...nextauth]'

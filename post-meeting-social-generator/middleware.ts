@@ -2,13 +2,10 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-// Import the app initializer to start services
-import './lib/app-initializer'
+// Remove the app-initializer import that was causing Edge Runtime issues
 
 export function middleware(request: NextRequest) {
-  // The app initializer will automatically start the polling service
-  // when this middleware runs (which happens on every request)
-  
+  // Simple middleware without Prisma operations
   return NextResponse.next()
 }
 
