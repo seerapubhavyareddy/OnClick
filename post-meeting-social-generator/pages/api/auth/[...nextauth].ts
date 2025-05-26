@@ -1,4 +1,4 @@
-// pages/api/auth/[...nextauth].ts - CLEAN VERSION (Google auth only)
+// pages/api/auth/[...nextauth].ts - COMPLETELY REMOVE LinkedIn from NextAuth
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
@@ -12,7 +12,7 @@ export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   
   providers: [
-    // ONLY Google for authentication
+    // ONLY Google for authentication - NO LinkedIn here
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
@@ -24,7 +24,6 @@ export const authOptions: NextAuthOptions = {
         },
       },
     }),
-    // NO LinkedIn provider here - we handle it separately
   ],
   
   callbacks: {
@@ -82,10 +81,17 @@ export const authOptions: NextAuthOptions = {
       return false
     },
     
+    // IMPORTANT: Fix redirect callback to prevent infinite loops
     async redirect({ url, baseUrl }) {
       console.log(`🔄 NextAuth redirect called:`, { url, baseUrl })
       
-      // Default redirect handling
+      // Don't handle LinkedIn callbacks - let our custom handler deal with it
+      if (url.includes('/api/social/linkedin-callback')) {
+        console.log(`🟦 Ignoring LinkedIn callback redirect`)
+        return baseUrl
+      }
+      
+      // Handle other redirects normally
       if (url.startsWith("/")) return `${baseUrl}${url}`
       else if (new URL(url).origin === baseUrl) return url
       return baseUrl
@@ -97,7 +103,7 @@ export const authOptions: NextAuthOptions = {
     error: '/api/auth/error',
   },
   
-  debug: process.env.NODE_ENV === 'development',
+  debug: false, // Turn off debug in production
 }
 
 export default NextAuth(authOptions)

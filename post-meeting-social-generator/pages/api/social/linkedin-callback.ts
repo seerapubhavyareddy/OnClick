@@ -1,4 +1,4 @@
-// pages/api/social/linkedin-callback.ts - CUSTOM callback (separate from NextAuth)
+// pages/api/social/linkedin-callback.ts - FIXED callback with better error handling
 import { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../lib/prisma'
 
@@ -9,26 +9,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     console.log('🟦 LinkedIn callback received')
-    console.log('🟦 Query params:', req.query)
     console.log('🟦 Environment:', process.env.NODE_ENV)
-    console.log('🟦 NEXTAUTH_URL:', process.env.NEXTAUTH_URL)
-    console.log('🟦 VERCEL_URL:', process.env.VERCEL_URL)
+    console.log('🟦 Query params:', req.query)
 
     // Import URL helper
-    const { getBaseUrl, getLinkedInCallbackUrl } = await import('../../../lib/url-helper')
+    const { getBaseUrl } = await import('../../../lib/url-helper')
     const baseUrl = getBaseUrl()
-    const callbackUrl = getLinkedInCallbackUrl()
+    
+    console.log('🟦 Base URL:', baseUrl)
 
     const { code, state, error } = req.query
 
     if (error) {
       console.error('🟦 LinkedIn OAuth error:', error)
-      return res.redirect(`${baseUrl}/settings?error=linkedin_failed&details=${encodeURIComponent(error as string)}`)
+      const errorUrl = `${baseUrl}/settings?error=linkedin_failed&details=${encodeURIComponent(error as string)}`
+      console.log('🟦 Redirecting to error URL:', errorUrl)
+      return res.redirect(302, errorUrl)
     }
 
     if (!code || !state) {
       console.error('🟦 Missing code or state')
-      return res.redirect(`${baseUrl}/settings?error=missing_params`)
+      const errorUrl = `${baseUrl}/settings?error=missing_params`
+      console.log('🟦 Redirecting to error URL:', errorUrl)
+      return res.redirect(302, errorUrl)
     }
 
     // Parse state
@@ -37,15 +40,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       stateData = JSON.parse(state as string)
       console.log('🟦 Parsed state:', stateData)
     } catch (parseError) {
-      console.error('🟦 Invalid state JSON:', state)
-      return res.redirect(`${baseUrl}/settings?error=invalid_state`)
+      console.error('🟦 Invalid state JSON:', state, parseError)
+      const errorUrl = `${baseUrl}/settings?error=invalid_state`
+      console.log('🟦 Redirecting to error URL:', errorUrl)
+      return res.redirect(302, errorUrl)
     }
 
     const { userId, action, platform } = stateData
 
     if (action !== 'connect_social' || platform !== 'linkedin' || !userId) {
       console.error('🟦 Invalid state data:', stateData)
-      return res.redirect(`${baseUrl}/settings?error=invalid_request`)
+      const errorUrl = `${baseUrl}/settings?error=invalid_request`
+      console.log('🟦 Redirecting to error URL:', errorUrl)
+      return res.redirect(302, errorUrl)
     }
 
     // Verify user exists
@@ -55,37 +62,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (!user) {
       console.error('🟦 User not found:', userId)
-      return res.redirect(`${baseUrl}/settings?error=user_not_found`)
+      const errorUrl = `${baseUrl}/settings?error=user_not_found`
+      console.log('🟦 Redirecting to error URL:', errorUrl)
+      return res.redirect(302, errorUrl)
     }
 
+    console.log('🟦 User verified:', user.email)
     console.log('🟦 Exchanging code for tokens...')
 
     // Exchange code for tokens
+    const tokenRequestBody = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: code as string,
+      redirect_uri: `${baseUrl}/api/social/linkedin-callback`,
+      client_id: process.env.LINKEDIN_CLIENT_ID!,
+      client_secret: process.env.LINKEDIN_CLIENT_SECRET!,
+    })
+
+    console.log('🟦 Token request body:', tokenRequestBody.toString())
+
     const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json'
       },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: code as string,
-        redirect_uri: callbackUrl, // Use the helper function
-        client_id: process.env.LINKEDIN_CLIENT_ID!,
-        client_secret: process.env.LINKEDIN_CLIENT_SECRET!,
-      }),
+      body: tokenRequestBody.toString(),
     })
 
+    console.log('🟦 Token response status:', tokenResponse.status)
+    
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text()
       console.error('🟦 LinkedIn token error:', tokenResponse.status, errorText)
-      return res.redirect(`${baseUrl}/settings?error=token_failed&status=${tokenResponse.status}`)
+      const errorUrl = `${baseUrl}/settings?error=token_failed&status=${tokenResponse.status}`
+      console.log('🟦 Redirecting to error URL:', errorUrl)
+      return res.redirect(302, errorUrl)
     }
 
     const tokens = await tokenResponse.json()
     console.log('🟦 Tokens received:', { 
       hasAccessToken: !!tokens.access_token,
-      expiresIn: tokens.expires_in 
+      expiresIn: tokens.expires_in,
+      tokenType: tokens.token_type
     })
 
     // Get user info from LinkedIn
@@ -97,17 +116,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
     })
 
+    console.log('🟦 User info response status:', userResponse.status)
+
     if (!userResponse.ok) {
       const errorText = await userResponse.text()
       console.error('🟦 LinkedIn userinfo error:', userResponse.status, errorText)
-      return res.redirect(`${baseUrl}/settings?error=userinfo_failed&status=${userResponse.status}`)
+      const errorUrl = `${baseUrl}/settings?error=userinfo_failed&status=${userResponse.status}`
+      console.log('🟦 Redirecting to error URL:', errorUrl)
+      return res.redirect(302, errorUrl)
     }
 
     const linkedinUser = await userResponse.json()
     console.log('🟦 LinkedIn user received:', {
       sub: linkedinUser.sub,
       name: linkedinUser.name,
-      email: linkedinUser.email
+      email: linkedinUser.email,
+      hasImage: !!linkedinUser.picture
     })
 
     // Store LinkedIn connection
@@ -124,7 +148,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token || null,
         expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-        scope: 'openid profile email', // Store the scope we requested
+        scope: 'openid profile email',
         profileData: {
           name: linkedinUser.name,
           email: linkedinUser.email,
@@ -152,19 +176,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     })
 
-    console.log('✅ LinkedIn connected successfully for user:', user.email)
+    console.log('✅ LinkedIn connected successfully!')
     console.log('✅ Social account ID:', socialAccount.id)
+    console.log('✅ For user:', user.email)
 
-    // Redirect to settings with success
-    return res.redirect(`${baseUrl}/settings?connected=linkedin&email=${encodeURIComponent(linkedinUser.email)}`)
+    // Redirect to settings with success - USE 302 redirect explicitly
+    const successUrl = `${baseUrl}/settings?connected=linkedin&email=${encodeURIComponent(linkedinUser.email)}`
+    console.log('🟦 Redirecting to success URL:', successUrl)
+    
+    return res.redirect(302, successUrl)
 
   } catch (error) {
     console.error('❌ LinkedIn callback error:', error)
     
-    // Import URL helper for error redirect
-    const { getBaseUrl } = await import('../../../lib/url-helper')
-    const baseUrl = getBaseUrl()
-    
-    return res.redirect(`${baseUrl}/settings?error=callback_failed`)
+    try {
+      // Import URL helper for error redirect
+      const { getBaseUrl } = await import('../../../lib/url-helper')
+      const baseUrl = getBaseUrl()
+      
+      const errorUrl = `${baseUrl}/settings?error=callback_failed`
+      console.log('🟦 Redirecting to error URL:', errorUrl)
+      return res.redirect(302, errorUrl)
+    } catch (importError) {
+      console.error('❌ Failed to import URL helper:', importError)
+      return res.status(500).json({ error: 'Internal server error' })
+    }
   }
 }
