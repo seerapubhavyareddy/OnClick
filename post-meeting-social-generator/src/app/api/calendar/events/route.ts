@@ -1,4 +1,5 @@
 // src/app/api/calendar/events/route.ts - Updated for multiple accounts
+export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'

@@ -1,7 +1,7 @@
-// src/app/settings/page.tsx - FIXED TypeScript errors
+// src/app/settings/page.tsx - Complete file with Suspense fix
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSession, signIn } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import { SettingsIcon, CheckCircleIcon, XCircleIcon, AlertCircleIcon, PlusIcon, TrashIcon } from 'lucide-react'
@@ -21,7 +21,8 @@ interface SocialAccount {
   createdAt: string
 }
 
-export default function SettingsPage() {
+// Component that uses useSearchParams - wrapped in Suspense
+function SettingsContent() {
   const { data: session, status } = useSession()
   const searchParams = useSearchParams()
   const [googleAccounts, setGoogleAccounts] = useState<GoogleAccount[]>([])
@@ -141,7 +142,6 @@ export default function SettingsPage() {
     }
   }
 
-  // FIXED: Added the missing connectLinkedIn function
   const connectLinkedIn = async () => {
     setConnecting('linkedin')
     try {
@@ -481,5 +481,18 @@ export default function SettingsPage() {
         </div>
       </main>
     </div>
+  )
+}
+
+// Main component with Suspense wrapper
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    }>
+      <SettingsContent />
+    </Suspense>
   )
 }
