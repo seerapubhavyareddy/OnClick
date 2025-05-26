@@ -1,4 +1,4 @@
-// pages/api/social/linkedin-callback.ts - Handle LinkedIn connections
+// pages/api/social/linkedin-callback.ts - CUSTOM callback (separate from NextAuth)
 import { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../lib/prisma'
 
@@ -8,14 +8,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
+    console.log('🟦 LinkedIn callback received')
+    console.log('🟦 Query params:', req.query)
+
     const { code, state, error } = req.query
 
     if (error) {
-      console.error('LinkedIn OAuth error:', error)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=linkedin_failed`)
+      console.error('🟦 LinkedIn OAuth error:', error)
+      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=linkedin_failed&details=${encodeURIComponent(error as string)}`)
     }
 
     if (!code || !state) {
+      console.error('🟦 Missing code or state')
       return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=missing_params`)
     }
 
@@ -23,21 +27,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let stateData
     try {
       stateData = JSON.parse(state as string)
-    } catch {
+      console.log('🟦 Parsed state:', stateData)
+    } catch (parseError) {
+      console.error('🟦 Invalid state JSON:', state)
       return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=invalid_state`)
     }
 
     const { userId, action, platform } = stateData
 
     if (action !== 'connect_social' || platform !== 'linkedin' || !userId) {
+      console.error('🟦 Invalid state data:', stateData)
       return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=invalid_request`)
     }
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    })
+
+    if (!user) {
+      console.error('🟦 User not found:', userId)
+      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=user_not_found`)
+    }
+
+    console.log('🟦 Exchanging code for tokens...')
 
     // Exchange code for tokens
     const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
       },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
@@ -50,28 +70,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text()
-      console.error('LinkedIn token error:', errorText)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=token_failed`)
+      console.error('🟦 LinkedIn token error:', tokenResponse.status, errorText)
+      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=token_failed&status=${tokenResponse.status}`)
     }
 
     const tokens = await tokenResponse.json()
+    console.log('🟦 Tokens received:', { 
+      hasAccessToken: !!tokens.access_token,
+      expiresIn: tokens.expires_in 
+    })
 
     // Get user info from LinkedIn
+    console.log('🟦 Fetching LinkedIn user info...')
     const userResponse = await fetch('https://api.linkedin.com/v2/userinfo', {
       headers: {
         'Authorization': `Bearer ${tokens.access_token}`,
+        'Accept': 'application/json'
       },
     })
 
     if (!userResponse.ok) {
-      console.error('LinkedIn userinfo error:', userResponse.status)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=userinfo_failed`)
+      const errorText = await userResponse.text()
+      console.error('🟦 LinkedIn userinfo error:', userResponse.status, errorText)
+      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=userinfo_failed&status=${userResponse.status}`)
     }
 
     const linkedinUser = await userResponse.json()
+    console.log('🟦 LinkedIn user received:', {
+      sub: linkedinUser.sub,
+      name: linkedinUser.name,
+      email: linkedinUser.email
+    })
 
     // Store LinkedIn connection
-    await prisma.socialAccount.upsert({
+    console.log('🟦 Storing LinkedIn connection in database...')
+    const socialAccount = await prisma.socialAccount.upsert({
       where: {
         userId_platform: {
           userId: userId,
@@ -83,6 +116,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token || null,
         expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
+        scope: 'openid profile email', // Store the scope we requested
         profileData: {
           name: linkedinUser.name,
           email: linkedinUser.email,
@@ -99,6 +133,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token || null,
         expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
+        scope: 'openid profile email',
         profileData: {
           name: linkedinUser.name,
           email: linkedinUser.email,
@@ -109,13 +144,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     })
 
-    console.log(`✅ LinkedIn connected for posting: ${linkedinUser.email}`)
+    console.log('✅ LinkedIn connected successfully for user:', user.email)
+    console.log('✅ Social account ID:', socialAccount.id)
 
     // Redirect to settings with success
     return res.redirect(`${process.env.NEXTAUTH_URL}/settings?connected=linkedin&email=${encodeURIComponent(linkedinUser.email)}`)
 
   } catch (error) {
-    console.error('LinkedIn callback error:', error)
+    console.error('❌ LinkedIn callback error:', error)
     return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=callback_failed`)
   }
 }

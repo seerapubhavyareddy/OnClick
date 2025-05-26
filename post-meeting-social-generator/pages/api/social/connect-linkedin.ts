@@ -1,4 +1,4 @@
-// pages/api/social/connect-linkedin.ts - New endpoint for LinkedIn connections
+// pages/api/social/connect-linkedin.ts - FIXED VERSION
 import { NextApiRequest, NextApiResponse } from 'next'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../auth/[...nextauth]'
@@ -22,22 +22,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: 'User not found' })
       }
 
-      // Generate LinkedIn OAuth URL for connection (not authentication)
-      const baseUrl = process.env.NEXTAUTH_URL || 
-                     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 
-                     'https://post-meeting-social-generator.vercel.app')
+      // Generate LinkedIn OAuth URL for connection (SEPARATE from NextAuth)
+      const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
       
       console.log(`🔗 Using base URL for LinkedIn: ${baseUrl}`)
       
       const clientId = process.env.LINKEDIN_CLIENT_ID!
       
-      // Use the existing NextAuth callback URL (already registered)
-      const redirectUri = `${baseUrl}/api/auth/callback/linkedin`
+      // Use CUSTOM callback URL (not NextAuth's)
+      const redirectUri = `${baseUrl}/api/social/linkedin-callback`
       
       const state = JSON.stringify({
         action: 'connect_social',
         userId: user.id,
-        platform: 'linkedin'
+        platform: 'linkedin',
+        timestamp: Date.now() // Add timestamp for security
       })
 
       const authUrl = new URL('https://www.linkedin.com/oauth/v2/authorization')
@@ -46,6 +45,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       authUrl.searchParams.set('redirect_uri', redirectUri)
       authUrl.searchParams.set('scope', 'openid profile email')
       authUrl.searchParams.set('state', state)
+
+      console.log('🟦 Generated LinkedIn OAuth URL:', authUrl.toString())
+      console.log('🟦 Redirect URI:', redirectUri)
+      console.log('🟦 State:', state)
 
       return res.json({ 
         success: true,
@@ -75,12 +78,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       // Remove LinkedIn connection
-      await prisma.socialAccount.deleteMany({
+      const deleted = await prisma.socialAccount.deleteMany({
         where: {
           userId: user.id,
           platform: 'linkedin'
         }
       })
+
+      console.log(`🗑️ Deleted ${deleted.count} LinkedIn connections for user: ${user.email}`)
 
       return res.json({ 
         success: true, 
