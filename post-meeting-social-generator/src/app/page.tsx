@@ -129,6 +129,31 @@ export default function Home() {
     }
   }, [session?.user?.email])
 
+  useEffect(() => {
+    // Suppress Chrome extension errors that don't affect our app
+    const originalError = console.error;
+    console.error = (...args) => {
+      const message = args[0]?.toString() || '';
+      
+      // Ignore specific Chrome extension errors
+      if (
+        message.includes('runtime.lastError') ||
+        message.includes('message channel closed') ||
+        message.includes('Extension context invalidated')
+      ) {
+        return; // Don't log these errors
+      }
+      
+      // Log all other errors normally
+      originalError.apply(console, args);
+    };
+    
+    // Clean up on component unmount
+    return () => {
+      console.error = originalError;
+    };
+  }, []);
+
   const fetchCalendarEvents = async () => {
     if (!session?.user?.email) return
     

@@ -1,13 +1,8 @@
-// lib/url-helper.ts - Create this new file for consistent URL handling
+// lib/url-helper.ts - FIXED with correct production domain
 export function getBaseUrl(): string {
-  // Production
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`
-  }
-  
-  // Explicit production URL
-  if (process.env.NEXTAUTH_URL && process.env.NODE_ENV === 'production') {
-    return process.env.NEXTAUTH_URL
+  // Force production domain in production
+  if (process.env.NODE_ENV === 'production') {
+    return 'https://post-meeting-social-generator.vercel.app'
   }
   
   // Development

@@ -1,9 +1,9 @@
-// src/app/settings/page.tsx - Complete file with Suspense fix
+// src/app/settings/page.tsx - FIXED to prevent infinite refresh
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, Suspense, useCallback } from 'react'
 import { useSession, signIn } from 'next-auth/react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { SettingsIcon, CheckCircleIcon, XCircleIcon, AlertCircleIcon, PlusIcon, TrashIcon } from 'lucide-react'
 
 interface GoogleAccount {
@@ -25,53 +25,24 @@ interface SocialAccount {
 function SettingsContent() {
   const { data: session, status } = useSession()
   const searchParams = useSearchParams()
+  const router = useRouter()
   const [googleAccounts, setGoogleAccounts] = useState<GoogleAccount[]>([])
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [urlParamsProcessed, setUrlParamsProcessed] = useState(false)
 
-  useEffect(() => {
-    if (session) {
-      fetchAccounts()
-    }
-  }, [session])
-
-  useEffect(() => {
-    // Handle URL parameters for connection status - Fixed null check
-    if (searchParams) {
-      const connected = searchParams.get('connected')
-      const error = searchParams.get('error')
-      const email = searchParams.get('email')
-
-      if (connected === 'google' && email) {
-        setMessage(`✅ Google account ${email} connected successfully!`)
-        setTimeout(() => setMessage(null), 5000)
-      } else if (connected === 'linkedin') {
-        setMessage(`✅ LinkedIn account connected successfully!`)
-        setTimeout(() => setMessage(null), 5000)
-      } else if (error) {
-        const errorMessages = {
-          oauth_failed: 'OAuth authentication failed',
-          missing_params: 'Missing required parameters',
-          invalid_state: 'Invalid request state',
-          invalid_request: 'Invalid request',
-          no_email: 'No email received from Google',
-          callback_failed: 'Connection callback failed'
-        }
-        setMessage(`❌ ${errorMessages[error as keyof typeof errorMessages] || 'Connection failed'}`)
-        setTimeout(() => setMessage(null), 5000)
-      }
-    }
-  }, [searchParams])
-
-  const fetchAccounts = async () => {
+  const fetchAccounts = useCallback(async () => {
     try {
+      console.log('🔄 Fetching accounts...')
+      
       // Fetch Google accounts
       const googleResponse = await fetch('/api/google/accounts')
       if (googleResponse.ok) {
         const accounts = await googleResponse.json()
         setGoogleAccounts(accounts)
+        console.log('✅ Google accounts loaded:', accounts.length)
       }
 
       // Fetch social accounts
@@ -79,13 +50,75 @@ function SettingsContent() {
       if (socialResponse.ok) {
         const accounts = await socialResponse.json()
         setSocialAccounts(accounts)
+        console.log('✅ Social accounts loaded:', accounts.length)
       }
     } catch (error) {
-      console.error('Error fetching accounts:', error)
+      console.error('❌ Error fetching accounts:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    if (session) {
+      fetchAccounts()
+    }
+  }, [session, fetchAccounts])
+
+  // Handle URL parameters ONCE only - prevent infinite refresh
+  useEffect(() => {
+    if (!searchParams || urlParamsProcessed) {
+      return
+    }
+
+    console.log('🔍 Processing URL parameters...')
+    
+    const connected = searchParams.get('connected')
+    const error = searchParams.get('error')
+    const email = searchParams.get('email')
+
+    // Set the flag immediately to prevent re-processing
+    setUrlParamsProcessed(true)
+
+    if (connected === 'google' && email) {
+      setMessage(`✅ Google account ${email} connected successfully!`)
+      setTimeout(() => setMessage(null), 5000)
+      // Clean URL after processing
+      router.replace('/settings', { scroll: false })
+    } else if (connected === 'linkedin') {
+      // Refresh accounts first, then show message
+      fetchAccounts().then(() => {
+        setMessage(`✅ LinkedIn account connected successfully!`)
+        if (email) {
+          setMessage(`✅ LinkedIn account ${email} connected successfully!`)
+        }
+        setTimeout(() => setMessage(null), 5000)
+      })
+      // Clean URL after processing
+      router.replace('/settings', { scroll: false })
+    } else if (error) {
+      const errorMessages: Record<string, string> = {
+        oauth_failed: 'OAuth authentication failed',
+        missing_params: 'Missing required parameters',
+        invalid_state: 'Invalid request state',
+        invalid_request: 'Invalid request',
+        no_email: 'No email received from provider',
+        callback_failed: 'Connection callback failed',
+        linkedin_failed: 'LinkedIn connection failed',
+        token_failed: 'Token exchange failed',
+        userinfo_failed: 'Failed to get user info',
+        user_not_found: 'User not found'
+      }
+      
+      const errorMessage = errorMessages[error] || 'Connection failed'
+      setMessage(`❌ ${errorMessage}`)
+      setTimeout(() => setMessage(null), 8000) // Longer timeout for errors
+      // Clean URL after processing
+      router.replace('/settings', { scroll: false })
+    }
+
+    console.log('✅ URL parameters processed')
+  }, [searchParams, urlParamsProcessed, router, fetchAccounts])
 
   const addGoogleAccount = async () => {
     setConnecting('google')
@@ -142,34 +175,34 @@ function SettingsContent() {
     }
   }
 
-//   connectLinkedIn 
-const connectLinkedIn = async () => {
-  setConnecting('linkedin')
-  try {
-    // Use the NEW LinkedIn connection endpoint (NOT NextAuth)
-    const response = await fetch('/api/social/connect-linkedin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
+  const connectLinkedIn = async () => {
+    setConnecting('linkedin')
+    try {
+      console.log('🟦 Initiating LinkedIn connection...')
+      
+      const response = await fetch('/api/social/connect-linkedin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
 
-    if (response.ok) {
-      const result = await response.json()
-      console.log('✅ LinkedIn connection URL generated:', result.authUrl)
-      // Redirect to LinkedIn OAuth for connection (not authentication)
-      window.location.href = result.authUrl
-    } else {
-      const error = await response.json()
-      alert(`Failed to connect LinkedIn: ${error.error}`)
+      if (response.ok) {
+        const result = await response.json()
+        console.log('✅ LinkedIn connection URL generated:', result.authUrl)
+        // Redirect to LinkedIn OAuth for connection
+        window.location.href = result.authUrl
+      } else {
+        const error = await response.json()
+        console.error('❌ LinkedIn connection failed:', error)
+        alert(`Failed to connect LinkedIn: ${error.error}`)
+      }
+    } catch (error) {
+      console.error('❌ Error connecting LinkedIn:', error)
+      alert('Failed to connect LinkedIn')
+    } finally {
+      setConnecting(null)
     }
-  } catch (error) {
-    console.error('Error connecting LinkedIn:', error)
-    alert('Failed to connect LinkedIn')
-  } finally {
-    setConnecting(null)
   }
-}
 
-  // Keep mock connection for Facebook (demo mode)
   const connectMockSocialAccount = async (platform: string) => {
     setConnecting(platform)
     try {
@@ -196,49 +229,46 @@ const connectLinkedIn = async () => {
   }
 
   const disconnectSocialAccount = async (platform: string) => {
-  try {
-    if (platform === 'linkedin') {
-      // Use the NEW LinkedIn disconnect endpoint
-      const response = await fetch('/api/social/connect-linkedin', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-      })
+    try {
+      if (platform === 'linkedin') {
+        const response = await fetch('/api/social/connect-linkedin', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+        })
 
-      if (response.ok) {
-        setSocialAccounts(accounts => 
-          accounts.filter(account => account.platform !== platform)
-        )
-        setMessage(`✅ LinkedIn disconnected successfully`)
-        setTimeout(() => setMessage(null), 3000)
+        if (response.ok) {
+          setSocialAccounts(accounts => 
+            accounts.filter(account => account.platform !== platform)
+          )
+          setMessage(`✅ LinkedIn disconnected successfully`)
+          setTimeout(() => setMessage(null), 3000)
+        } else {
+          const error = await response.json()
+          alert(`Failed to disconnect: ${error.error}`)
+        }
       } else {
-        const error = await response.json()
-        alert(`Failed to disconnect: ${error.error}`)
-      }
-    } else {
-      // For other platforms, use the old method
-      const response = await fetch('/api/social/disconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform })
-      })
+        const response = await fetch('/api/social/disconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platform })
+        })
 
-      if (response.ok) {
-        setSocialAccounts(accounts => 
-          accounts.filter(account => account.platform !== platform)
-        )
-        setMessage(`✅ ${platform} account disconnected successfully`)
-        setTimeout(() => setMessage(null), 3000)
-      } else {
-        const error = await response.json()
-        alert(`Failed to disconnect: ${error.error}`)
+        if (response.ok) {
+          setSocialAccounts(accounts => 
+            accounts.filter(account => account.platform !== platform)
+          )
+          setMessage(`✅ ${platform} account disconnected successfully`)
+          setTimeout(() => setMessage(null), 3000)
+        } else {
+          const error = await response.json()
+          alert(`Failed to disconnect: ${error.error}`)
+        }
       }
+    } catch (error) {
+      console.error('Error disconnecting account:', error)
+      alert('Failed to disconnect account')
     }
-  } catch (error) {
-    console.error('Error disconnecting account:', error)
-    alert('Failed to disconnect account')
   }
-}
-
 
   const isConnected = (platform: string) => {
     return socialAccounts.some(account => account.platform === platform)

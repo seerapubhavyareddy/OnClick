@@ -1,4 +1,4 @@
-// pages/api/auth/[...nextauth].ts - COMPLETELY REMOVE LinkedIn from NextAuth
+// pages/api/auth/[...nextauth].ts - FIXED with correct domain handling
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
@@ -81,20 +81,44 @@ export const authOptions: NextAuthOptions = {
       return false
     },
     
-    // IMPORTANT: Fix redirect callback to prevent infinite loops
+    // FIXED: Proper redirect callback with correct domain handling
     async redirect({ url, baseUrl }) {
       console.log(`🔄 NextAuth redirect called:`, { url, baseUrl })
+      
+      // FORCE the correct production domain
+      const correctBaseUrl = 'https://post-meeting-social-generator.vercel.app'
       
       // Don't handle LinkedIn callbacks - let our custom handler deal with it
       if (url.includes('/api/social/linkedin-callback')) {
         console.log(`🟦 Ignoring LinkedIn callback redirect`)
-        return baseUrl
+        return correctBaseUrl
       }
       
-      // Handle other redirects normally
-      if (url.startsWith("/")) return `${baseUrl}${url}`
-      else if (new URL(url).origin === baseUrl) return url
-      return baseUrl
+      // Always use the correct domain for redirects
+      if (url.startsWith("/")) {
+        const redirectUrl = `${correctBaseUrl}${url}`
+        console.log(`🔄 Redirecting to: ${redirectUrl}`)
+        return redirectUrl
+      }
+      
+      // If it's a full URL, check if it's our domain
+      try {
+        const urlObj = new URL(url)
+        if (urlObj.hostname.includes('post-meeting-social-generator')) {
+          // Force our correct domain
+          urlObj.hostname = 'post-meeting-social-generator.vercel.app'
+          const correctedUrl = urlObj.toString()
+          console.log(`🔄 Corrected URL: ${correctedUrl}`)
+          return correctedUrl
+        }
+      } catch (e) {
+        // If URL parsing fails, fall back to correct base URL
+        console.log(`🔄 URL parsing failed, using base: ${correctBaseUrl}`)
+        return correctBaseUrl
+      }
+      
+      console.log(`🔄 Default redirect: ${correctBaseUrl}`)
+      return correctBaseUrl
     },
   },
   

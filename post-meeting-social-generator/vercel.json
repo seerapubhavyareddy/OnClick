@@ -23,7 +23,7 @@
     }
   ],
   "env": {
-    "NEXTAUTH_URL": "${VERCEL_URL}"
+    "NEXTAUTH_URL": "https://post-meeting-social-generator.vercel.app"
   },
   "buildCommand": "prisma generate && next build"
 }
