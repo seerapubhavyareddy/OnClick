@@ -1,4 +1,4 @@
-// src/app/api/google/callback/route.ts
+// src/app/api/google/callback/route.ts - FIXED for production
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
@@ -13,24 +13,29 @@ export async function GET(request: NextRequest) {
     const state = searchParams.get('state')
     const error = searchParams.get('error')
 
+    // FIXED: Determine base URL properly for production
+    const baseUrl = process.env.NEXTAUTH_URL || 
+                   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 
+                   'https://post-meeting-social-generator.vercel.app')
+    
+    console.log(`🔄 Google callback processing with base URL: ${baseUrl}`)
+
     // Parse state to get user info and redirect URL
     let stateData
-    let redirectBase = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+    let redirectBase = baseUrl
     
     try {
       if (state) {
         stateData = JSON.parse(state)
-        // Use the redirectUrl from state if available
+        // Use the redirectUrl from state if available, otherwise use baseUrl
         if (stateData.redirectUrl) {
           redirectBase = stateData.redirectUrl
         }
       }
     } catch (parseError) {
       console.error('Invalid state parameter:', parseError)
-      return NextResponse.redirect(`${redirectBase}/settings?error=invalid_state`)
+      return NextResponse.redirect(`${baseUrl}/settings?error=invalid_state`)
     }
-
-    console.log(`🔄 Google callback processing with redirect base: ${redirectBase}`)
 
     if (error) {
       console.error('Google OAuth error:', error)
@@ -47,11 +52,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${redirectBase}/settings?error=invalid_request`)
     }
 
+    // FIXED: Use the correct callback URL for production
+    const callbackUrl = `${baseUrl}/api/google/callback`
+    
+    console.log(`🔧 Using callback URL: ${callbackUrl}`)
+
     // Exchange code for tokens
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      `${redirectBase}/api/google/callback`
+      callbackUrl
     )
 
     const { tokens } = await oauth2Client.getToken(code)
@@ -84,8 +94,8 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Error in Google callback:', error)
-    // Fallback to NEXTAUTH_URL if everything else fails
-    const fallbackUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+    // FIXED: Use proper fallback URL
+    const fallbackUrl = process.env.NEXTAUTH_URL || 'https://post-meeting-social-generator.vercel.app'
     return NextResponse.redirect(`${fallbackUrl}/settings?error=callback_failed&message=${encodeURIComponent(error instanceof Error ? error.message : 'Unknown error')}`)
   }
 }

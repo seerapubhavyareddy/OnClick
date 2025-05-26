@@ -1,4 +1,4 @@
-// src/app/api/google/add-account/route.ts
+// src/app/api/google/add-account/route.ts - FIXED for production
 export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -23,10 +23,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Determine the base URL correctly
+    // FIXED: Determine the base URL correctly for production
     const baseUrl = process.env.NEXTAUTH_URL || 
                    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 
-                   'http://localhost:3000')
+                   'https://post-meeting-social-generator.vercel.app')
     
     console.log(`🔄 Creating Google auth URL with base: ${baseUrl}`)
 
