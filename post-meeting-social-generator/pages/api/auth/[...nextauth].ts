@@ -1,4 +1,4 @@
-// pages/api/auth/[...nextauth].ts - FIXED with proper account linking
+// pages/api/auth/[...nextauth].ts - FINAL PRODUCTION VERSION
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
@@ -12,6 +12,7 @@ export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   
   providers: [
+    // PRIMARY AUTHENTICATION: Google only
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
@@ -24,7 +25,7 @@ export const authOptions: NextAuthOptions = {
       },
     }),
     
-    // LinkedIn provider - working configuration
+    // SOCIAL POSTING TOOL: LinkedIn (not for authentication)
     {
       id: "linkedin",
       name: "LinkedIn",
@@ -81,7 +82,7 @@ export const authOptions: NextAuthOptions = {
         id_token_signed_response_alg: "RS256",
       },
       profile(profile: any) {
-        console.log('🟦 LinkedIn profile received:', JSON.stringify(profile, null, 2));
+        console.log('🟦 LinkedIn profile received for connection:', JSON.stringify(profile, null, 2));
         return {
           id: profile.sub,
           name: profile.name,
@@ -132,149 +133,36 @@ export const authOptions: NextAuthOptions = {
       return session
     },
     
-    // 🔥 FIXED SIGN-IN CALLBACK - Handles different emails properly
+    // CRITICAL: Block LinkedIn as authentication, allow only Google
     async signIn({ user, account }) {
-      console.log(`🔑 SignIn: ${user.email} via ${account?.provider}`)
+      console.log(`🔑 SignIn attempt: ${user.email} via ${account?.provider}`)
       
       if (!user.email || !account) {
-        console.error('❌ Missing email or account')
         return false
       }
       
-      try {
-        // For LinkedIn, we need to handle the email mismatch issue
-        if (account.provider === 'linkedin') {
-          console.log(`🟦 LinkedIn sign-in for: ${user.email}`)
-          
-          // Check if there's an existing user with similar email patterns
-          // This handles cases where LinkedIn email might be slightly different
-          const existingUser = await prisma.user.findFirst({
-            where: {
-              OR: [
-                { email: user.email }, // Exact match
-                { email: 'bhavyareddyseerapu7658@gmail.com' }, // Your Google account email
-                // Add other email variations if needed
-              ]
-            }
-          })
-          
-          if (existingUser) {
-            console.log(`📧 Found existing user: ${existingUser.email}, linking LinkedIn account`)
-            
-            // Store LinkedIn connection
-            await prisma.socialAccount.upsert({
-              where: {
-                userId_platform: {
-                  userId: existingUser.id,
-                  platform: 'linkedin'
-                }
-              },
-              update: {
-                platformId: account.providerAccountId!,
-                accessToken: account.access_token || '',
-                refreshToken: account.refresh_token || null,
-                expiresAt: account.expires_at ? new Date(account.expires_at * 1000) : null,
-                scope: account.scope || null,
-                profileData: {
-                  name: user.name,
-                  email: user.email,
-                  image: user.image,
-                  platformId: account.providerAccountId,
-                  connectedAt: new Date().toISOString()
-                },
-                updatedAt: new Date()
-              },
-              create: {
-                userId: existingUser.id,
-                platform: 'linkedin',
-                platformId: account.providerAccountId!,
-                accessToken: account.access_token || '',
-                refreshToken: account.refresh_token || null,
-                expiresAt: account.expires_at ? new Date(account.expires_at * 1000) : null,
-                scope: account.scope || null,
-                profileData: {
-                  name: user.name,
-                  email: user.email,
-                  image: user.image,
-                  platformId: account.providerAccountId,
-                  connectedAt: new Date().toISOString()
-                }
-              }
-            })
-            
-            // Create/update the NextAuth account record with the existing user's ID
-            await prisma.account.upsert({
-              where: {
-                provider_providerAccountId: {
-                  provider: 'linkedin',
-                  providerAccountId: account.providerAccountId
-                }
-              },
-              update: {
-                access_token: account.access_token || null,
-                refresh_token: account.refresh_token || null,
-                expires_at: account.expires_at || null,
-                scope: account.scope || null,
-                token_type: account.token_type || null,
-                id_token: account.id_token || null
-              },
-              create: {
-                userId: existingUser.id, // Link to existing user
-                type: account.type,
-                provider: account.provider,
-                providerAccountId: account.providerAccountId,
-                access_token: account.access_token || null,
-                refresh_token: account.refresh_token || null,
-                expires_at: account.expires_at || null,
-                scope: account.scope || null,
-                token_type: account.token_type || null,
-                id_token: account.id_token || null
-              }
-            })
-            
-            console.log(`✅ LinkedIn successfully linked to existing user: ${existingUser.email}`)
-            return true
-          } else {
-            console.log(`👤 Creating new user for LinkedIn: ${user.email}`)
-            // Let NextAuth create the new user normally
-            return true
-          }
-        }
-        
-        // Handle Google and other providers normally
-        const existingUser = await prisma.user.findUnique({
-          where: { email: user.email }
-        })
-        
-        if (!existingUser) {
-          console.log('👤 New user will be created by NextAuth adapter')
-          return true
-        }
-        
-        if (account.provider === 'google' && account.access_token) {
-          await prisma.user.update({
-            where: { id: existingUser.id },
-            data: {
-              name: user.name,
-              image: user.image,
-              updatedAt: new Date()
-            }
-          })
-          console.log(`✅ Google user updated: ${user.email}`)
-        }
-        
-        return true
-        
-      } catch (error) {
-        console.error('❌ SignIn error:', error)
-        // For LinkedIn, we want to allow the sign-in even if social account linking fails
-        return account.provider === 'linkedin' ? true : false
+      // BLOCK LinkedIn direct sign-in
+      if (account.provider === 'linkedin') {
+        console.log(`🚫 LinkedIn blocked: Not for authentication, use Google first`)
+        return false
       }
+      
+      // ALLOW Google authentication
+      if (account.provider === 'google') {
+        console.log(`✅ Google authentication allowed: ${user.email}`)
+        return true
+      }
+      
+      // Block all others
+      return false
     },
     
     async redirect({ url, baseUrl }) {
-      if (url.includes('/api/auth/callback/linkedin')) {
-        return `${baseUrl}/settings?connected=linkedin`
+      // Redirect LinkedIn attempts to info page
+      if (url.includes('/api/auth/callback/linkedin') || 
+          url.includes('error=AccessDenied') || 
+          url.includes('error=OAuthAccountNotLinked')) {
+        return `${baseUrl}/?linkedin_info=true`
       }
       
       if (url.startsWith("/")) return `${baseUrl}${url}`
@@ -283,11 +171,7 @@ export const authOptions: NextAuthOptions = {
     },
   },
   
-  debug: process.env.NODE_ENV === 'development',
-  
-  pages: {
-    error: '/auth/error',
-  },
+  debug: false,
 }
 
 export default NextAuth(authOptions)

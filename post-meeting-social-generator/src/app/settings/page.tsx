@@ -142,20 +142,32 @@ function SettingsContent() {
     }
   }
 
-  const connectLinkedIn = async () => {
-    setConnecting('linkedin')
-    try {
-      // Use NextAuth to sign in with LinkedIn
-      await signIn('linkedin', { 
-        callbackUrl: '/settings?connected=linkedin',
-        redirect: true 
-      })
-    } catch (error) {
-      console.error('Error connecting LinkedIn:', error)
-      alert('Failed to connect LinkedIn')
-      setConnecting(null)
+//   connectLinkedIn 
+const connectLinkedIn = async () => {
+  setConnecting('linkedin')
+  try {
+    // Use the NEW LinkedIn connection endpoint (NOT NextAuth)
+    const response = await fetch('/api/social/connect-linkedin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    if (response.ok) {
+      const result = await response.json()
+      console.log('✅ LinkedIn connection URL generated:', result.authUrl)
+      // Redirect to LinkedIn OAuth for connection (not authentication)
+      window.location.href = result.authUrl
+    } else {
+      const error = await response.json()
+      alert(`Failed to connect LinkedIn: ${error.error}`)
     }
+  } catch (error) {
+    console.error('Error connecting LinkedIn:', error)
+    alert('Failed to connect LinkedIn')
+  } finally {
+    setConnecting(null)
   }
+}
 
   // Keep mock connection for Facebook (demo mode)
   const connectMockSocialAccount = async (platform: string) => {
@@ -184,7 +196,26 @@ function SettingsContent() {
   }
 
   const disconnectSocialAccount = async (platform: string) => {
-    try {
+  try {
+    if (platform === 'linkedin') {
+      // Use the NEW LinkedIn disconnect endpoint
+      const response = await fetch('/api/social/connect-linkedin', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      })
+
+      if (response.ok) {
+        setSocialAccounts(accounts => 
+          accounts.filter(account => account.platform !== platform)
+        )
+        setMessage(`✅ LinkedIn disconnected successfully`)
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        const error = await response.json()
+        alert(`Failed to disconnect: ${error.error}`)
+      }
+    } else {
+      // For other platforms, use the old method
       const response = await fetch('/api/social/disconnect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -201,11 +232,13 @@ function SettingsContent() {
         const error = await response.json()
         alert(`Failed to disconnect: ${error.error}`)
       }
-    } catch (error) {
-      console.error('Error disconnecting account:', error)
-      alert('Failed to disconnect account')
     }
+  } catch (error) {
+    console.error('Error disconnecting account:', error)
+    alert('Failed to disconnect account')
   }
+}
+
 
   const isConnected = (platform: string) => {
     return socialAccounts.some(account => account.platform === platform)
