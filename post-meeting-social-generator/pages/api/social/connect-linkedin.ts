@@ -23,8 +23,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       // Generate LinkedIn OAuth URL for connection (not authentication)
-      const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+      const baseUrl = process.env.NEXTAUTH_URL || 
+                     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 
+                     'https://post-meeting-social-generator.vercel.app')
+      
+      console.log(`🔗 Using base URL for LinkedIn: ${baseUrl}`)
+      
       const clientId = process.env.LINKEDIN_CLIENT_ID!
+      
+      // Use the existing NextAuth callback URL (already registered)
+      const redirectUri = `${baseUrl}/api/auth/callback/linkedin`
       
       const state = JSON.stringify({
         action: 'connect_social',
@@ -35,7 +43,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const authUrl = new URL('https://www.linkedin.com/oauth/v2/authorization')
       authUrl.searchParams.set('response_type', 'code')
       authUrl.searchParams.set('client_id', clientId)
-      authUrl.searchParams.set('redirect_uri', `${baseUrl}/api/social/linkedin-callback`)
+      authUrl.searchParams.set('redirect_uri', redirectUri)
       authUrl.searchParams.set('scope', 'openid profile email')
       authUrl.searchParams.set('state', state)
 
