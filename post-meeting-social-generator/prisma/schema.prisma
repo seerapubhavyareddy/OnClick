@@ -1,4 +1,4 @@
-// prisma/schema.prisma
+// prisma/schema.prisma - Clean version
 generator client {
   provider = "prisma-client-js"
 }
@@ -21,7 +21,7 @@ model Account {
   scope                    String?
   id_token                 String? @db.Text
   session_state            String?
-  refresh_token_expires_in Int?     // Add this field for Google OAuth
+  refresh_token_expires_in Int?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -48,7 +48,7 @@ model User {
   automations   Automation[]
   socialPosts   SocialPost[]
   settings      UserSettings?
-  googleCalendarAccounts GoogleCalendarAccount[]
+  socialAccounts SocialAccount[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -69,19 +69,19 @@ model Meeting {
   description       String?
   startTime         DateTime
   endTime           DateTime?
-  attendees         Json?     // Array of attendee objects
+  attendees         Json?
   meetingUrl        String?
-  platform          String?   // zoom, teams, meet, etc
+  platform          String?
   
   // Recall.ai bot fields
   recallBotId       String?
-  recallBotStatus   String?   // scheduled, joining, in_call, done, failed, etc
+  recallBotStatus   String?
   pollRetries       Int       @default(0)
   lastPolledAt      DateTime?
   
   // Transcript fields
-  transcript        Json?     // Raw transcript from Recall.ai
-  transcriptText    String?   // Formatted transcript text
+  transcript        Json?
+  transcriptText    String?
   videoUrl          String?
   
   // Status fields
@@ -103,13 +103,11 @@ model Automation {
   id            String    @id @default(cuid())
   userId        String
   name          String
-  type          String    // 'generate_post', 'send_email', etc
-  platform      String    // 'linkedin', 'facebook', 'twitter', 'email'
+  type          String
+  platform      String
   description   String?
-  prompt        String?   // Custom prompt for AI generation
+  prompt        String?
   enabled       Boolean   @default(true)
-  
-  // Settings specific to automation type
   settings      Json?
   
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -123,27 +121,20 @@ model SocialPost {
   id            String    @id @default(cuid())
   meetingId     String
   automationId  String
-  userId        String    // Denormalized for easy querying
+  userId        String
   
-  platform      String    // linkedin, facebook, twitter
+  platform      String
   content       String    @db.Text
   hashtags      String[]  @default([])
+  status        String    @default("draft")
   
-  status        String    @default("draft") // draft, posted, failed
-  
-  // Social media post IDs (when posted)
   platformPostId String?
   platformUrl    String?
-  
-  // Scheduling
   scheduledAt   DateTime?
   postedAt      DateTime?
-  
-  // Error handling
   lastError     String?
   retryCount    Int       @default(0)
   
-  // Relations
   meeting       Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   automation    Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -152,29 +143,12 @@ model SocialPost {
   updatedAt     DateTime  @updatedAt
 }
 
+// SIMPLIFIED UserSettings - removed duplicate social media fields
 model UserSettings {
   id                    String  @id @default(cuid())
   userId                String  @unique
-  
-  // Bot timing settings
   botJoinMinutesBefore  Int     @default(5)
-  
-  // Social media connections
-  linkedinConnected     Boolean @default(false)
-  linkedinAccessToken   String? @db.Text
-  linkedinRefreshToken  String? @db.Text
-  linkedinExpiresAt     DateTime?
-  
-  facebookConnected     Boolean @default(false)
-  facebookAccessToken   String? @db.Text
-  facebookPageId        String?
-  
-  twitterConnected      Boolean @default(false)
-  twitterAccessToken    String? @db.Text
-  twitterRefreshToken   String? @db.Text
-  
-  // AI settings
-  aiProvider            String  @default("claude") // claude, openai, etc
+  aiProvider            String  @default("claude")
   
   user                  User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   
@@ -182,23 +156,22 @@ model UserSettings {
   updatedAt             DateTime @updatedAt
 }
 
-model GoogleCalendarAccount {
-  id                String  @id @default(cuid())
-  userId            String
-  email             String
-  accessToken       String  @db.Text
-  refreshToken      String? @db.Text
-  expiresAt         DateTime?
-  calendarId        String  @default("primary")
+// MAIN social account storage - replaces UserSettings social fields
+model SocialAccount {
+  id           String    @id @default(cuid())
+  userId       String
+  platform     String    // 'linkedin' or 'facebook'
+  platformId   String    // Platform-specific user ID
+  accessToken  String    @db.Text
+  refreshToken String?   @db.Text
+  expiresAt    DateTime?
+  scope        String?
+  profileData  Json?     // Store profile info (name, profile_url, etc.)
   
-  // Display info
-  displayName       String?
-  isPrimary         Boolean @default(false)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
   
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
-  @@unique([userId, email])
+  @@unique([userId, platform])
 }

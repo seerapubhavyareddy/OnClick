@@ -60,22 +60,24 @@ export default function Home() {
   const [generatedContent, setGeneratedContent] = useState<any>(null)
   const [generatingContent, setGeneratingContent] = useState(false)
 
-  useEffect(() => {
-    if (session) {
-      fetchCalendarEvents()
-      fetchPastMeetings()
-      fetchPollingStats()
-      startPollingService()
-      
-      // Check token status and refresh if needed
-      checkAndRefreshTokens()
-      
-      // Set up token refresh interval (every 30 minutes)
-      const tokenRefreshInterval = setInterval(checkAndRefreshTokens, 30 * 60 * 1000)
-      
-      return () => clearInterval(tokenRefreshInterval)
-    }
-  }, [session])
+  // src/app/page.tsx - Find and replace the useEffect that starts polling
+
+useEffect(() => {
+  if (session) {
+    fetchCalendarEvents()
+    fetchPastMeetings()
+    // fetchPollingStats()        // Temporarily disabled
+    // startPollingService()      // Temporarily disabled - this was creating too many connections
+    
+    // Check token status and refresh if needed
+    checkAndRefreshTokens()
+    
+    // Set up token refresh interval (every 30 minutes)
+    const tokenRefreshInterval = setInterval(checkAndRefreshTokens, 30 * 60 * 1000)
+    
+    return () => clearInterval(tokenRefreshInterval)
+  }
+}, [session])
 
   const fetchCalendarEvents = async () => {
     try {
@@ -335,7 +337,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
+    {/* Header */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
@@ -354,6 +356,15 @@ export default function Home() {
                 <RefreshCwIcon className={`h-4 w-4 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
+              
+              <a 
+                href="/settings"
+                className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                <SettingsIcon className="h-4 w-4 mr-1" />
+                Settings
+              </a>
+              
               <img
                 src={session.user?.image || ''}
                 alt="Profile"
@@ -370,7 +381,6 @@ export default function Home() {
           </div>
         </div>
       </header>
-
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Phase Status */}
@@ -530,8 +540,6 @@ export default function Home() {
         </div>
 
         {/* Past Meetings */}
-        {/* // Updated Past Meetings section in page.tsx - Clean UI without follow-up email */}
-
         <div className="mb-12">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-semibold text-gray-900">
@@ -661,7 +669,9 @@ export default function Home() {
             </div>
           )}
         </div>
-{/* // Updated Content Generation Modal - Replace in page.tsx */}
+
+
+        {/* // Updated Content Generation Modal - Replace in page.tsx */}
 
         {/* Content Generation Modal */}
         {generatedContent && (
@@ -733,9 +743,48 @@ export default function Home() {
                       {generatedContent.type === 'social_post' && (
                         <button
                           className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                          onClick={() => alert('Connect LinkedIn/Facebook first to post! (Phase 4 feature)')}
+                          onClick={async () => {
+                            // Check if user has the platform connected
+                            const isConnected = session?.user?.socialAccounts?.some(
+                              account => account.platform === generatedContent.platform
+                            );
+                            
+                            if (!isConnected) {
+                              alert(`Please connect your ${generatedContent.platform?.charAt(0).toUpperCase() + generatedContent.platform?.slice(1)} account in Settings first!`);
+                              return;
+                            }
+                            
+                            // Try to post
+                            try {
+                              const response = await fetch('/api/social/post', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  platform: generatedContent.platform,
+                                  content: generatedContent.content,
+                                  meetingId: generatedContent.meetingId || null
+                                })
+                              });
+                              
+                              if (response.ok) {
+                                const result = await response.json();
+                                if (result.demo) {
+                                  alert(`🎯 Demo Post Created!\n\n✅ Content would be posted to ${generatedContent.platform}\n✅ Mock URL: ${result.postUrl}\n\nNote: This is a demonstration. Real posting requires LinkedIn business API approval.`);
+                                } else {
+                                  alert(`✅ Successfully posted to ${generatedContent.platform}!\n\nPost URL: ${result.postUrl}`);
+                                }
+                                setGeneratedContent(null);
+                              } else {
+                                const error = await response.json();
+                                alert(`❌ Failed to post: ${error.error}`);
+                              }
+                            } catch (error) {
+                              console.error('Post error:', error);
+                              alert('❌ Failed to post to social media');
+                            }
+                          }}
                         >
-                          📤 Post
+                          📤 Post to {generatedContent.platform?.charAt(0).toUpperCase() + generatedContent.platform?.slice(1)}
                         </button>
                       )}
                       
@@ -752,6 +801,7 @@ export default function Home() {
             </div>
           </div>
         )}
+
 
         {/* Transcript Modal */}
         {selectedMeeting && (
