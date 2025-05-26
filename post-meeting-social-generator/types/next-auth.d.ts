@@ -1,4 +1,4 @@
-// types/next-auth.d.ts - Create this file in your project root or types folder
+// types/next-auth.d.ts - Updated with Google account types
 import NextAuth from "next-auth"
 
 declare module "next-auth" {
@@ -11,6 +11,14 @@ declare module "next-auth" {
       socialAccounts?: Array<{
         platform: string
         profileData: any
+        createdAt: string
+      }>
+      googleAccounts?: Array<{
+        id: string
+        email: string
+        name?: string | null
+        image?: string | null
+        isPrimary: boolean
         createdAt: string
       }>
     }

@@ -1,16 +1,14 @@
-// pages/api/auth/[...nextauth].ts - Clean version (no inline types)
+// pages/api/auth/[...nextauth].ts - WITH LINKEDIN RESTORED
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import { prisma } from '../../../lib/prisma'
 
 export const authOptions: NextAuthOptions = {
-  // Use session strategy to reduce database calls
   session: {
-    strategy: 'jwt', // Use JWT instead of database sessions
+    strategy: 'jwt', // Use JWT to minimize DB calls
   },
   
-  // Still use Prisma adapter for user/account storage
   adapter: PrismaAdapter(prisma),
   
   providers: [
@@ -25,7 +23,7 @@ export const authOptions: NextAuthOptions = {
         },
       },
     }),
-    // Custom LinkedIn provider with proper token configuration
+    // LinkedIn provider - restored with proper configuration
     {
       id: "linkedin",
       name: "LinkedIn",
@@ -42,12 +40,10 @@ export const authOptions: NextAuthOptions = {
         params: {
           grant_type: 'authorization_code',
         },
-        // Force client authentication via request body
         request: async (context: any) => {
           const { provider, params } = context;
           const url = new URL(provider.token.url);
           
-          // Create body with proper type checking
           const bodyParams: Record<string, string> = {
             grant_type: 'authorization_code',
             client_id: provider.clientId || '',
@@ -94,19 +90,23 @@ export const authOptions: NextAuthOptions = {
   
   callbacks: {
     async jwt({ token, user }) {
-      // Store user ID in JWT to reduce database lookups
       if (user) {
         token.userId = user.id
+        token.userEmail = user.email
+        token.userName = user.name
+        token.userImage = user.image
       }
       return token
     },
     
     async session({ session, token }) {
-      // Add user ID from JWT
       if (session.user && token.userId) {
         session.user.id = token.userId as string
+        session.user.email = token.userEmail as string
+        session.user.name = token.userName as string
+        session.user.image = token.userImage as string
         
-        // Fetch social accounts
+        // Fetch social accounts for the session (but only when needed)
         try {
           const socialAccounts = await prisma.socialAccount.findMany({
             where: { userId: token.userId as string },
@@ -117,7 +117,6 @@ export const authOptions: NextAuthOptions = {
             }
           })
           
-          // Convert Date objects to strings to match our type declaration
           session.user.socialAccounts = socialAccounts.map(account => ({
             ...account,
             createdAt: account.createdAt.toISOString()
@@ -127,67 +126,83 @@ export const authOptions: NextAuthOptions = {
           session.user.socialAccounts = []
         }
       }
-      
       return session
     },
     
     async signIn({ user, account }) {
-      console.log('🔑 SignIn callback triggered')
+      console.log(`🔑 SignIn: ${user.email} via ${account?.provider}`)
       
       try {
-        // Handle LinkedIn connection
-        if (account && account.provider === 'linkedin') {
-          console.log(`🟦 Processing LinkedIn connection for: ${user.email}`)
-          
-          const existingUser = await prisma.user.findUnique({
-            where: { email: user.email! }
-          })
-
-          if (existingUser && account.access_token) {
-            const cleanProfileData = {
-              name: user.name || null,
-              email: user.email || null,
-              image: user.image || null,
-              platformId: account.providerAccountId,
-              connectedAt: new Date().toISOString()
-            }
-            
-            await prisma.socialAccount.upsert({
-              where: {
-                userId_platform: {
-                  userId: existingUser.id,
-                  platform: account.provider
-                }
-              },
-              update: {
-                platformId: account.providerAccountId!,
-                accessToken: account.access_token,
-                refreshToken: account.refresh_token,
-                expiresAt: account.expires_at ? new Date(account.expires_at * 1000) : null,
-                scope: account.scope,
-                profileData: cleanProfileData
-              },
-              create: {
-                userId: existingUser.id,
-                platform: account.provider,
-                platformId: account.providerAccountId!,
-                accessToken: account.access_token,
-                refreshToken: account.refresh_token,
-                expiresAt: account.expires_at ? new Date(account.expires_at * 1000) : null,
-                scope: account.scope,
-                profileData: cleanProfileData
-              }
-            })
-
-            console.log(`✅ LinkedIn connected successfully!`)
-          }
+        const existingUser = await prisma.user.findUnique({
+          where: { email: user.email! }
+        })
+        
+        if (!existingUser) {
+          console.log('👤 New user will be created by NextAuth adapter')
+          return true
         }
         
-        return true
+        if (account && account.provider === 'google' && account.access_token) {
+          // Update user info from Google
+          await prisma.user.update({
+            where: { id: existingUser.id },
+            data: {
+              name: user.name,
+              image: user.image,
+              updatedAt: new Date()
+            }
+          })
+          console.log(`✅ Google user updated: ${user.email}`)
+        }
+        
+        if (account && account.provider === 'linkedin' && account.access_token) {
+          console.log(`🟦 Processing LinkedIn connection for: ${user.email}`)
+          
+          const cleanProfileData = {
+            name: user.name || null,
+            email: user.email || null,
+            image: user.image || null,
+            platformId: account.providerAccountId,
+            connectedAt: new Date().toISOString()
+          }
+          
+          // Store LinkedIn connection in SocialAccount table
+          await prisma.socialAccount.upsert({
+            where: {
+              userId_platform: {
+                userId: existingUser.id,
+                platform: account.provider
+              }
+            },
+            update: {
+              platformId: account.providerAccountId!,
+              accessToken: account.access_token,
+              refreshToken: account.refresh_token,
+              expiresAt: account.expires_at ? new Date(account.expires_at * 1000) : null,
+              scope: account.scope,
+              profileData: cleanProfileData
+            },
+            create: {
+              userId: existingUser.id,
+              platform: account.provider,
+              platformId: account.providerAccountId!,
+              accessToken: account.access_token,
+              refreshToken: account.refresh_token,
+              expiresAt: account.expires_at ? new Date(account.expires_at * 1000) : null,
+              scope: account.scope,
+              profileData: cleanProfileData
+            }
+          })
+
+          console.log(`✅ LinkedIn connected successfully for: ${user.email}`)
+        }
+        
       } catch (error) {
-        console.error('❌ LinkedIn connection error:', error)
-        return true
+        console.error('SignIn error:', error)
+        // Don't fail login
       }
+      
+      return true
     },
     
     async redirect({ url, baseUrl }) {
@@ -202,7 +217,7 @@ export const authOptions: NextAuthOptions = {
     },
   },
   
-  debug: true,
+  debug: false,
 }
 
 export default NextAuth(authOptions)

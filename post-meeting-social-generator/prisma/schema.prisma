@@ -49,6 +49,7 @@ model User {
   socialPosts   SocialPost[]
   settings      UserSettings?
   socialAccounts SocialAccount[]
+  googleAccounts GoogleAccount[]  // Add this line
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -97,6 +98,9 @@ model Meeting {
   updatedAt         DateTime  @updatedAt
 
   @@unique([userId, calendarEventId])
+  @@index([userId])
+  @@index([recallBotId])
+  @@index([recallBotStatus])
 }
 
 model Automation {
@@ -174,4 +178,31 @@ model SocialAccount {
   updatedAt    DateTime  @updatedAt
   
   @@unique([userId, platform])
+  @@index([userId])  // ADD this line
+}
+
+model GoogleAccount {
+  id          String   @id @default(cuid())
+  userId      String
+  email       String
+  accessToken String   @db.Text
+  refreshToken String?  @db.Text
+  expiresAt   DateTime?
+  
+  // Display information
+  name        String?
+  image       String?
+  isPrimary   Boolean  @default(false)
+  
+  // Account metadata
+  accountId   String   // Google account ID
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([userId, email])
+  @@unique([userId, accountId])
+  @@index([userId])  // ADD this line
 }

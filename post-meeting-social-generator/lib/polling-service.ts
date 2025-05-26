@@ -1,4 +1,4 @@
-// lib/polling-service.ts - Optimized for Supabase
+// lib/polling-service.ts - FIXED with reduced frequency and auto-start
 import { prisma } from './prisma'
 import { recallClient } from './recall-client'
 import type { RecallTranscript, TranscriptSegment, TranscriptWord } from './types/transcript'
@@ -6,8 +6,8 @@ import type { RecallTranscript, TranscriptSegment, TranscriptWord } from './type
 export class PollingService {
   private isRunning = false
   private intervalId: NodeJS.Timeout | null = null
-  private readonly POLL_INTERVAL = 60000 // Increased to 60 seconds (was 30s)
-  private readonly MAX_RETRIES = 60 // Reduced retries (was 120)
+  private readonly POLL_INTERVAL = 120000 // 2 minutes (reduced from 60 seconds)
+  private readonly MAX_RETRIES = 30 // Reduced retries to avoid spam
   private isPolling = false // Prevent concurrent polling
 
   async startPolling() {
@@ -17,17 +17,17 @@ export class PollingService {
     }
 
     this.isRunning = true
-    console.log('🚀 Starting optimized Recall.ai polling service')
+    console.log('🚀 Starting Recall.ai polling service (every 2 minutes)')
 
+    // Start polling immediately
+    await this.pollActiveBots()
+
+    // Then set up interval
     this.intervalId = setInterval(async () => {
-      // Prevent concurrent polling operations
       if (!this.isPolling) {
         await this.pollActiveBots()
       }
     }, this.POLL_INTERVAL)
-
-    // Also run immediately
-    await this.pollActiveBots()
   }
 
   stopPolling() {
@@ -40,6 +40,11 @@ export class PollingService {
     console.log('⏹️ Polling service stopped')
   }
 
+  // Check if polling is running
+  isPollingActive(): boolean {
+    return this.isRunning
+  }
+
   private async pollActiveBots() {
     if (this.isPolling) {
       console.log('⏸️ Polling already in progress, skipping...')
@@ -47,9 +52,10 @@ export class PollingService {
     }
 
     this.isPolling = true
+    console.log('🔍 Starting bot polling cycle...')
     
     try {
-      // Get only a limited number of active meetings to reduce DB load
+      // Get active meetings that need polling
       const activeMeetings = await prisma.meeting.findMany({
         where: {
           recallBotId: { not: null },
@@ -64,42 +70,40 @@ export class PollingService {
           ],
           pollRetries: { lt: this.MAX_RETRIES }
         },
-        take: 5, // Limit to 5 meetings at a time
+        take: 3, // Reduced to 3 meetings at a time
         orderBy: {
           lastPolledAt: 'asc' // Poll oldest first
         }
       })
 
-      console.log(`🔍 Polling ${activeMeetings.length} active bots (limited batch)`)
+      console.log(`🔍 Found ${activeMeetings.length} active bots to poll`)
 
-      // Process meetings sequentially to avoid connection spikes
+      if (activeMeetings.length === 0) {
+        console.log('✅ No active bots found')
+        return
+      }
+
+      // Process meetings with longer delays to avoid rate limits
       for (const meeting of activeMeetings) {
         try {
           await this.pollSingleBot(meeting)
-          // Small delay between each bot check
-          await new Promise(resolve => setTimeout(resolve, 1000))
+          // Longer delay between each bot check (3 seconds)
+          await new Promise(resolve => setTimeout(resolve, 3000))
         } catch (error) {
           console.error(`❌ Error polling bot ${meeting.recallBotId}:`, error)
-          continue // Continue with next bot
+          continue
         }
       }
 
-      // Log completed meetings count (but don't fetch them to save connections)
-      const completedCount = await prisma.meeting.count({
-        where: {
-          recallBotId: { not: null },
-          recallBotStatus: {
-            in: ['done', 'call_ended', 'completed']
-          }
-        }
-      })
-      
-      console.log(`✅ Found ${completedCount} completed meetings`)
+      // Get summary stats
+      const stats = await this.getPollingStats()
+      console.log(`📊 Polling stats: ${stats.active} active, ${stats.completed} completed, ${stats.failed} failed`)
 
     } catch (error) {
       console.error('❌ Error in polling service:', error)
     } finally {
       this.isPolling = false
+      console.log('✅ Polling cycle completed')
     }
   }
 
@@ -118,7 +122,7 @@ export class PollingService {
       
       console.log(`📡 Bot ${meeting.recallBotId} status: ${latestStatus}`)
 
-      // Update meeting with latest bot status in a single operation
+      // Update meeting with latest bot status
       await prisma.meeting.update({
         where: { id: meeting.id },
         data: {
@@ -130,14 +134,16 @@ export class PollingService {
 
       // Check if bot is done and process transcript
       if (latestStatus === 'done' || latestStatus === 'call_ended') {
-        console.log(`✅ Bot ${meeting.recallBotId} completed`)
+        console.log(`✅ Bot ${meeting.recallBotId} completed - processing transcript`)
         await this.processCompletedBot(meeting, bot)
+      } else {
+        console.log(`⏳ Bot ${meeting.recallBotId} still ${latestStatus} - will check again later`)
       }
 
     } catch (error) {
       console.error(`❌ Error processing bot ${meeting.recallBotId}:`, error)
       
-      // Update error status in single operation
+      // Update error status
       await prisma.meeting.update({
         where: { id: meeting.id },
         data: {
@@ -158,7 +164,6 @@ export class PollingService {
       if (transcript && transcript.length > 0) {
         const transcriptText = this.formatTranscript(transcript)
         
-        // Single database update for completed meeting
         await prisma.meeting.update({
           where: { id: meeting.id },
           data: {
@@ -170,8 +175,9 @@ export class PollingService {
           }
         })
 
-        console.log(`✅ Transcript saved for: ${meeting.title}`)
+        console.log(`✅ Transcript saved for: ${meeting.title} (${transcriptText.length} characters)`)
       } else {
+        console.log(`⚠️ No transcript available for: ${meeting.title}`)
         await prisma.meeting.update({
           where: { id: meeting.id },
           data: {
@@ -207,6 +213,41 @@ export class PollingService {
       })
       .filter(line => line.trim().length > 0)
       .join('\n')
+  }
+
+  // Get polling statistics
+  private async getPollingStats() {
+    try {
+      const active = await prisma.meeting.count({
+        where: {
+          recallBotId: { not: null },
+          recallBotStatus: {
+            in: ['ready', 'joining_call', 'in_waiting_room', 'in_call_not_recording', 'in_call_recording']
+          }
+        }
+      })
+
+      const completed = await prisma.meeting.count({
+        where: {
+          recallBotId: { not: null },
+          recallBotStatus: 'completed'
+        }
+      })
+
+      const failed = await prisma.meeting.count({
+        where: {
+          recallBotId: { not: null },
+          recallBotStatus: {
+            in: ['processing_failed', 'no_transcript']
+          }
+        }
+      })
+
+      return { active, completed, failed }
+    } catch (error) {
+      console.error('Error getting polling stats:', error)
+      return { active: 0, completed: 0, failed: 0 }
+    }
   }
 }
 

@@ -1,7 +1,8 @@
-// src/app/page.tsx - Updated with Past Meetings and Polling Status
+// src/app/page.tsx - FIXED VERSION with proper user session isolation
 'use client'
 
-import { useState, useEffect } from 'react'
+import '../../lib/app-initializer' // This will auto-start polling
+import { useState, useEffect, useCallback } from 'react'
 import { useSession, signIn, signOut } from 'next-auth/react'
 import { CalendarIcon, SettingsIcon, CheckCircleIcon, ClockIcon, UsersIcon, LinkIcon, RefreshCwIcon, AlertCircleIcon, X } from 'lucide-react'
 
@@ -25,6 +26,10 @@ interface CalendarEvent {
   platform?: string
   noteTakerEnabled: boolean
   hasValidMeetingUrl: boolean
+  accountInfo?: {
+    email: string
+    name?: string
+  }
 }
 
 interface PastMeeting {
@@ -59,30 +64,84 @@ export default function Home() {
   const [selectedMeeting, setSelectedMeeting] = useState<any>(null)
   const [generatedContent, setGeneratedContent] = useState<any>(null)
   const [generatingContent, setGeneratingContent] = useState(false)
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
 
-  // src/app/page.tsx - Find and replace the useEffect that starts polling
-
-useEffect(() => {
-  if (session) {
-    fetchCalendarEvents()
-    fetchPastMeetings()
-    // fetchPollingStats()        // Temporarily disabled
-    // startPollingService()      // Temporarily disabled - this was creating too many connections
-    
-    // Check token status and refresh if needed
-    checkAndRefreshTokens()
-    
-    // Set up token refresh interval (every 30 minutes)
-    const tokenRefreshInterval = setInterval(checkAndRefreshTokens, 30 * 60 * 1000)
-    
-    return () => clearInterval(tokenRefreshInterval)
+  const ensurePollingIsRunning = async () => {
+    try {
+      const response = await fetch('/api/polling')
+      if (response.ok) {
+        const data = await response.json()
+        console.log('📊 Polling status:', data)
+      } else {
+        // Start polling if not running
+        console.log('🚀 Starting polling service...')
+        await fetch('/api/polling', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start' })
+        })
+      }
+    } catch (error) {
+      console.error('Error checking polling status:', error)
+    }
   }
-}, [session])
+
+  // Clear data when session changes to prevent cross-contamination
+  const clearUserData = useCallback(() => {
+    setCalendarEvents([])
+    setPastMeetings([])
+    setPollingStats(null)
+    setSelectedMeeting(null)
+    setGeneratedContent(null)
+    setError(null)
+    setCurrentUserEmail(null)
+  }, [])
+
+  // Monitor session changes and clear data if user changes
+  useEffect(() => {
+    if (session?.user?.email) {
+      if (currentUserEmail && currentUserEmail !== session.user.email) {
+        console.log('🔄 User changed, clearing data...')
+        clearUserData()
+      }
+      setCurrentUserEmail(session.user.email)
+    } else if (!session && currentUserEmail) {
+      console.log('🔄 User signed out, clearing data...')
+      clearUserData()
+    }
+  }, [session?.user?.email, currentUserEmail, clearUserData])
+
+  useEffect(() => {
+    if (session?.user?.email) {
+      console.log('📊 Loading data for user:', session.user.email)
+      fetchCalendarEvents()
+      fetchPastMeetings()
+      checkAndRefreshTokens()
+
+      // Ensure polling service is running
+      ensurePollingIsRunning()
+    
+
+      // Set up token refresh interval (every 30 minutes)
+      const tokenRefreshInterval = setInterval(checkAndRefreshTokens, 30 * 60 * 1000)
+      
+      return () => clearInterval(tokenRefreshInterval)
+    }
+  }, [session?.user?.email])
 
   const fetchCalendarEvents = async () => {
+    if (!session?.user?.email) return
+    
     try {
       setError(null)
-      const response = await fetch('/api/calendar/events')
+      console.log('📅 Fetching calendar events for:', session.user.email)
+      
+      const response = await fetch('/api/calendar/events', {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      })
       
       if (!response.ok) {
         const errorData = await response.json()
@@ -90,6 +149,7 @@ useEffect(() => {
       }
       
       const events = await response.json()
+      console.log('✅ Calendar events loaded:', events.length)
       setCalendarEvents(events)
     } catch (error: any) {
       console.error('Error fetching calendar events:', error)
@@ -105,11 +165,24 @@ useEffect(() => {
   }
 
   const fetchPastMeetings = async () => {
+    if (!session?.user?.email) return
+    
     try {
-      const response = await fetch('/api/meetings/past')
+      console.log('📋 Fetching past meetings for:', session.user.email)
+      
+      const response = await fetch('/api/meetings/past', {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      })
+      
       if (response.ok) {
         const meetings = await response.json()
+        console.log('✅ Past meetings loaded:', meetings.length)
         setPastMeetings(meetings)
+      } else {
+        console.error('Failed to fetch past meetings')
       }
     } catch (error) {
       console.error('Error fetching past meetings:', error)
@@ -128,19 +201,9 @@ useEffect(() => {
     }
   }
 
-  const startPollingService = async () => {
-    try {
-      await fetch('/api/polling', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start' })
-      })
-    } catch (error) {
-      console.error('Error starting polling service:', error)
-    }
-  }
-
   const checkAndRefreshTokens = async () => {
+    if (!session?.user?.email) return
+    
     try {
       const response = await fetch('/api/auth/refresh-tokens')
       const tokenStatus = await response.json()
@@ -192,7 +255,10 @@ useEffect(() => {
       
       if (response.ok) {
         const result = await response.json()
-        setGeneratedContent(result)
+        setGeneratedContent({
+          ...result,
+          meetingId
+        })
       } else {
         const error = await response.json()
         alert(error.error || 'Failed to generate content')
@@ -222,7 +288,6 @@ useEffect(() => {
         // Then fetch updated events
         await fetchCalendarEvents()
         await fetchPastMeetings()
-        await fetchPollingStats()
       }
     } catch (error) {
       console.error('Error refreshing calendar:', error)
@@ -303,6 +368,12 @@ useEffect(() => {
     }
   }
 
+  const handleSignOut = async () => {
+    console.log('🔓 Signing out and clearing data...')
+    clearUserData()
+    await signOut()
+  }
+
   if (status === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -337,7 +408,7 @@ useEffect(() => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-    {/* Header */}
+      {/* Header */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
@@ -369,10 +440,12 @@ useEffect(() => {
                 src={session.user?.image || ''}
                 alt="Profile"
                 className="h-8 w-8 rounded-full"
+                key={session.user?.email} // Force re-render when user changes
               />
               <span className="text-gray-700">{session.user?.name}</span>
+              <span className="text-xs text-gray-500">({session.user?.email})</span>
               <button
-                onClick={() => signOut()}
+                onClick={handleSignOut}
                 className="text-gray-500 hover:text-gray-700"
               >
                 Sign out
@@ -381,12 +454,13 @@ useEffect(() => {
           </div>
         </div>
       </header>
+
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Phase Status */}
         <div className="bg-white rounded-lg shadow p-6 mb-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            Phase 2: Google Calendar Integration ✅
+            Multiple Google Calendar Integration ✅
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="flex items-center">
@@ -403,21 +477,9 @@ useEffect(() => {
             </div>
             <div className="flex items-center">
               <CheckCircleIcon className="h-5 w-5 text-green-500 mr-3" />
-              <span className="text-gray-700">Polling Active</span>
+              <span className="text-gray-700">User: {currentUserEmail}</span>
             </div>
           </div>
-          
-          {/* Polling Stats */}
-          {pollingStats && (
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <p className="text-sm text-gray-600 mb-2">Bot Status:</p>
-              <div className="flex space-x-4 text-sm">
-                <span className="text-blue-600">Active: {pollingStats.activeBots}</span>
-                <span className="text-green-600">Completed: {pollingStats.completedBots}</span>
-                <span className="text-red-600">Failed: {pollingStats.failedBots}</span>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Error Message */}
@@ -430,7 +492,7 @@ useEffect(() => {
                 <p className="text-red-600 text-sm">{error}</p>
                 {error.includes('expired') && (
                   <button
-                    onClick={() => signOut()}
+                    onClick={handleSignOut}
                     className="mt-2 text-sm text-red-700 underline hover:text-red-900"
                   >
                     Sign out and sign in again
@@ -448,7 +510,7 @@ useEffect(() => {
               Your Upcoming Meetings
             </h2>
             <p className="text-sm text-gray-500">
-              From your Google Calendar
+              From your Google Calendar accounts
             </p>
           </div>
 
@@ -502,6 +564,14 @@ useEffect(() => {
                         <span className="text-gray-400 text-xs">No meeting link</span>
                       )}
                     </div>
+
+                    {event.accountInfo && (
+                      <div className="flex items-center">
+                        <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                          📧 {event.accountInfo.email}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {!event.hasValidMeetingUrl && (
@@ -527,7 +597,7 @@ useEffect(() => {
               <CalendarIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-500 mb-2">No upcoming meetings found</p>
               <p className="text-sm text-gray-400">
-                Meetings from your Google Calendar will appear here
+                Meetings from your Google Calendar accounts will appear here
               </p>
               <button
                 onClick={refreshCalendarEvents}
@@ -546,7 +616,7 @@ useEffect(() => {
               Past Meetings
             </h2>
             <p className="text-sm text-gray-500">
-              Meetings with transcripts
+              Your completed meetings with transcripts
             </p>
           </div>
 
@@ -669,9 +739,6 @@ useEffect(() => {
             </div>
           )}
         </div>
-
-
-        {/* // Updated Content Generation Modal - Replace in page.tsx */}
 
         {/* Content Generation Modal */}
         {generatedContent && (
@@ -802,7 +869,6 @@ useEffect(() => {
           </div>
         )}
 
-
         {/* Transcript Modal */}
         {selectedMeeting && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -866,7 +932,7 @@ useEffect(() => {
           </h3>
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <p><span className="font-medium">Name:</span> {session.user?.name}</p>
+              <p><span className="font-medium">Current User:</span> {session.user?.name}</p>
               <p><span className="font-medium">Email:</span> {session.user?.email}</p>
               <p><span className="font-medium">Authentication:</span> ✅ Active</p>
               <p><span className="font-medium">Calendar Access:</span> {error ? '❌ Error' : '✅ Connected'}</p>
@@ -876,7 +942,7 @@ useEffect(() => {
               <p><span className="font-medium">Past Meetings:</span> {pastMeetings.length}</p>
               <p><span className="font-medium">With Meeting URLs:</span> {calendarEvents.filter(e => e.hasValidMeetingUrl).length}</p>
               <p><span className="font-medium">Bots Enabled:</span> {calendarEvents.filter(e => e.noteTakerEnabled).length}</p>
-              <p><span className="font-medium">Phase 2:</span> ✅ Complete</p>
+              <p><span className="font-medium">Google Accounts:</span> {session.user?.googleAccounts?.length || 0}</p>
             </div>
           </div>
         </div>

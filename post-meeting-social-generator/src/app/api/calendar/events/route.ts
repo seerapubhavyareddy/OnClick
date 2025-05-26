@@ -1,10 +1,10 @@
-// src/app/api/calendar/events/route.ts
+// src/app/api/calendar/events/route.ts - Updated for multiple accounts
 export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../../../pages/api/auth/[...nextauth]'
-import { getCalendarClientForUser } from '../../../../../lib/google-calendar'
+import { multipleAccountCalendarService } from '../../../../../lib/multiple-calendar-service'
 import { prisma } from '../../../../../lib/prisma'
 
 // Add this interface at the top
@@ -29,16 +29,63 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const calendarClient = await getCalendarClientForUser(user.id)
-    
-    if (!calendarClient) {
-      return NextResponse.json({ 
-        error: 'Google Calendar not connected. Please sign in again to refresh permissions.' 
-      }, { status: 400 })
-    }
-
     try {
-      const events = await calendarClient.getUpcomingEvents(20)
+      console.log(`📅 Fetching events from all Google accounts for user: ${user.email}`)
+      
+      // First check if we have any Google accounts
+      const googleAccountCount = await prisma.googleAccount.count({
+        where: { userId: user.id }
+      })
+      
+      console.log(`🔍 Found ${googleAccountCount} Google accounts in database for user: ${user.id}`)
+      
+      if (googleAccountCount === 0) {
+        console.log(`⚠️ No Google accounts found, falling back to NextAuth Account table`)
+        
+        // Fallback to original single account approach
+        const { getCalendarClientForUser } = await import('../../../../../lib/google-calendar')
+        const calendarClient = await getCalendarClientForUser(user.id)
+        
+        if (!calendarClient) {
+          return NextResponse.json({ 
+            error: 'Google Calendar not connected. Please sign in again to refresh permissions.' 
+          }, { status: 400 })
+        }
+        
+        const events = await calendarClient.getUpcomingEvents(20)
+        
+        const existingMeetings: ExistingMeeting[] = await prisma.meeting.findMany({
+          where: {
+            userId: user.id,
+            calendarEventId: { in: events.map(e => e.id) }
+          },
+          select: {
+            calendarEventId: true,
+            noteTakerEnabled: true,
+          }
+        })
+
+        const meetingMap = new Map(
+          existingMeetings.map((m: ExistingMeeting) => [m.calendarEventId, m.noteTakerEnabled])
+        )
+
+        const enhancedEvents = events.map(event => ({
+          ...event,
+          noteTakerEnabled: meetingMap.get(event.id) || false,
+          hasValidMeetingUrl: !!event.meetingUrl,
+          accountInfo: {
+            email: user.email,
+            name: user.name
+          }
+        }))
+
+        return NextResponse.json(enhancedEvents)
+      }
+      
+      // Get events from all connected Google accounts
+      const events = await multipleAccountCalendarService.getAllCalendarEvents(user.id)
+      
+      console.log(`✅ Got ${events.length} events from all Google accounts`)
       
       const existingMeetings: ExistingMeeting[] = await prisma.meeting.findMany({
         where: {
@@ -59,6 +106,11 @@ export async function GET(request: NextRequest) {
         ...event,
         noteTakerEnabled: meetingMap.get(event.id) || false,
         hasValidMeetingUrl: !!event.meetingUrl,
+        // Add account information for display
+        accountInfo: {
+          email: event.accountEmail,
+          name: event.accountName
+        }
       }))
 
       return NextResponse.json(enhancedEvents)
@@ -95,15 +147,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const calendarClient = await getCalendarClientForUser(user.id)
-    
-    if (!calendarClient) {
-      return NextResponse.json({ 
-        error: 'Google Calendar not connected' 
-      }, { status: 400 })
-    }
-
-    const events = await calendarClient.getUpcomingEvents(20)
+    const events = await multipleAccountCalendarService.getAllCalendarEvents(user.id)
     
     // Update or create meeting records for events with meeting URLs
     const updatePromises = events

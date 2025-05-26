@@ -1,9 +1,19 @@
-// src/app/settings/page.tsx
+// src/app/settings/page.tsx - FIXED TypeScript errors
 'use client'
 
 import { useState, useEffect } from 'react'
 import { useSession, signIn } from 'next-auth/react'
-import { SettingsIcon, LinkIcon, CheckCircleIcon, XCircleIcon, CalendarIcon } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
+import { SettingsIcon, CheckCircleIcon, XCircleIcon, AlertCircleIcon, PlusIcon, TrashIcon } from 'lucide-react'
+
+interface GoogleAccount {
+  id: string
+  email: string
+  name?: string | null
+  image?: string | null
+  isPrimary: boolean
+  createdAt: string
+}
 
 interface SocialAccount {
   platform: string
@@ -13,39 +23,162 @@ interface SocialAccount {
 
 export default function SettingsPage() {
   const { data: session, status } = useSession()
+  const searchParams = useSearchParams()
+  const [googleAccounts, setGoogleAccounts] = useState<GoogleAccount[]>([])
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (session) {
-      fetchSocialAccounts()
+      fetchAccounts()
     }
   }, [session])
 
-  const fetchSocialAccounts = async () => {
+  useEffect(() => {
+    // Handle URL parameters for connection status - Fixed null check
+    if (searchParams) {
+      const connected = searchParams.get('connected')
+      const error = searchParams.get('error')
+      const email = searchParams.get('email')
+
+      if (connected === 'google' && email) {
+        setMessage(`✅ Google account ${email} connected successfully!`)
+        setTimeout(() => setMessage(null), 5000)
+      } else if (connected === 'linkedin') {
+        setMessage(`✅ LinkedIn account connected successfully!`)
+        setTimeout(() => setMessage(null), 5000)
+      } else if (error) {
+        const errorMessages = {
+          oauth_failed: 'OAuth authentication failed',
+          missing_params: 'Missing required parameters',
+          invalid_state: 'Invalid request state',
+          invalid_request: 'Invalid request',
+          no_email: 'No email received from Google',
+          callback_failed: 'Connection callback failed'
+        }
+        setMessage(`❌ ${errorMessages[error as keyof typeof errorMessages] || 'Connection failed'}`)
+        setTimeout(() => setMessage(null), 5000)
+      }
+    }
+  }, [searchParams])
+
+  const fetchAccounts = async () => {
     try {
-      const response = await fetch('/api/social/accounts')
-      if (response.ok) {
-        const accounts = await response.json()
+      // Fetch Google accounts
+      const googleResponse = await fetch('/api/google/accounts')
+      if (googleResponse.ok) {
+        const accounts = await googleResponse.json()
+        setGoogleAccounts(accounts)
+      }
+
+      // Fetch social accounts
+      const socialResponse = await fetch('/api/social/accounts')
+      if (socialResponse.ok) {
+        const accounts = await socialResponse.json()
         setSocialAccounts(accounts)
       }
     } catch (error) {
-      console.error('Error fetching social accounts:', error)
+      console.error('Error fetching accounts:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const connectSocialAccount = async (provider: string) => {
-    setConnecting(provider)
+  const addGoogleAccount = async () => {
+    setConnecting('google')
     try {
-      // Redirect to OAuth provider
-      await signIn(provider, { 
-        callbackUrl: '/settings?connected=' + provider 
+      const response = await fetch('/api/google/add-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        // Redirect to Google OAuth
+        window.location.href = result.authUrl
+      } else {
+        const error = await response.json()
+        alert(`Failed to add Google account: ${error.error}`)
+      }
+    } catch (error) {
+      console.error('Error adding Google account:', error)
+      alert('Failed to add Google account')
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  const removeGoogleAccount = async (email: string) => {
+    if (googleAccounts.length <= 1) {
+      alert('Cannot remove your last Google account')
+      return
+    }
+
+    if (!confirm(`Remove Google account ${email}?`)) return
+
+    try {
+      const response = await fetch('/api/google/accounts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      })
+
+      if (response.ok) {
+        setGoogleAccounts(accounts => 
+          accounts.filter(account => account.email !== email)
+        )
+        setMessage(`✅ Google account ${email} removed successfully`)
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        const error = await response.json()
+        alert(`Failed to remove account: ${error.error}`)
+      }
+    } catch (error) {
+      console.error('Error removing Google account:', error)
+      alert('Failed to remove Google account')
+    }
+  }
+
+  // FIXED: Added the missing connectLinkedIn function
+  const connectLinkedIn = async () => {
+    setConnecting('linkedin')
+    try {
+      // Use NextAuth to sign in with LinkedIn
+      await signIn('linkedin', { 
+        callbackUrl: '/settings?connected=linkedin',
+        redirect: true 
       })
     } catch (error) {
-      console.error(`Error connecting ${provider}:`, error)
+      console.error('Error connecting LinkedIn:', error)
+      alert('Failed to connect LinkedIn')
+      setConnecting(null)
+    }
+  }
+
+  // Keep mock connection for Facebook (demo mode)
+  const connectMockSocialAccount = async (platform: string) => {
+    setConnecting(platform)
+    try {
+      const response = await fetch('/api/social/mock-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform })
+      })
+
+      if (response.ok) {
+        await fetchAccounts()
+        setMessage(`✅ Demo ${platform} account connected successfully!`)
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        const error = await response.json()
+        alert(`Failed to connect ${platform}: ${error.error}`)
+      }
+    } catch (error) {
+      console.error(`Error connecting ${platform}:`, error)
+      alert(`Failed to connect ${platform}`)
+    } finally {
       setConnecting(null)
     }
   }
@@ -62,8 +195,11 @@ export default function SettingsPage() {
         setSocialAccounts(accounts => 
           accounts.filter(account => account.platform !== platform)
         )
+        setMessage(`✅ ${platform} account disconnected successfully`)
+        setTimeout(() => setMessage(null), 3000)
       } else {
-        alert('Failed to disconnect account')
+        const error = await response.json()
+        alert(`Failed to disconnect: ${error.error}`)
       }
     } catch (error) {
       console.error('Error disconnecting account:', error)
@@ -126,6 +262,92 @@ export default function SettingsPage() {
       {/* Main Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
+        {/* Status Messages */}
+        {message && (
+          <div className={`mb-6 p-4 rounded-lg ${
+            message.includes('✅') 
+              ? 'bg-green-50 border border-green-200 text-green-800' 
+              : 'bg-red-50 border border-red-200 text-red-800'
+          }`}>
+            {message}
+          </div>
+        )}
+        
+        {/* Google Accounts */}
+        <div className="bg-white rounded-lg shadow p-6 mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-6">
+            Google Calendar Accounts
+          </h2>
+          <p className="text-gray-600 mb-6">
+            Connect multiple Google accounts to access all your calendars.
+          </p>
+
+          <div className="space-y-4 mb-6">
+            {googleAccounts.map((account) => (
+              <div key={account.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div className="flex items-center">
+                  <img
+                    src={account.image || `https://ui-avatars.com/api/?name=${encodeURIComponent(account.name || account.email)}&background=4f46e5&color=ffffff`}
+                    alt={account.name || account.email}
+                    className="w-10 h-10 rounded-full mr-3"
+                  />
+                  <div>
+                    <div className="flex items-center">
+                      <h3 className="text-sm font-medium text-gray-900">
+                        {account.name || account.email}
+                      </h3>
+                      {account.isPrimary && (
+                        <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                          Primary
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-500">{account.email}</p>
+                    <p className="text-xs text-gray-400">
+                      Connected {new Date(account.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <CheckCircleIcon className="h-5 w-5 text-green-500" />
+                  {!account.isPrimary && (
+                    <button
+                      onClick={() => removeGoogleAccount(account.email)}
+                      className="p-1 text-red-500 hover:text-red-700"
+                      title="Remove account"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={addGoogleAccount}
+            disabled={connecting === 'google'}
+            className="flex items-center px-4 py-2 border border-blue-300 text-blue-700 rounded-md hover:bg-blue-50 disabled:opacity-50 transition-colors"
+          >
+            <PlusIcon className="h-4 w-4 mr-2" />
+            {connecting === 'google' ? 'Connecting...' : 'Add Another Google Account'}
+          </button>
+        </div>
+
+        {/* Social Media Info */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8">
+          <div className="flex items-center">
+            <AlertCircleIcon className="h-5 w-5 text-blue-600 mr-3" />
+            <div>
+              <p className="text-blue-800 font-medium">Social Media Integration</p>
+              <p className="text-blue-700 text-sm">
+                LinkedIn uses real OAuth. Facebook uses demo mode (requires additional business verification for posting).
+              </p>
+            </div>
+          </div>
+        </div>
+        
         {/* Social Media Connections */}
         <div className="bg-white rounded-lg shadow p-6 mb-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">
@@ -175,7 +397,7 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <button
-                  onClick={() => connectSocialAccount('linkedin')}
+                  onClick={connectLinkedIn}
                   disabled={connecting === 'linkedin'}
                   className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
@@ -207,7 +429,7 @@ export default function SettingsPage() {
               {isConnected('facebook') ? (
                 <div className="space-y-3">
                   <div className="bg-green-50 border border-green-200 rounded p-3">
-                    <p className="text-green-800 text-sm font-medium">✓ Connected</p>
+                    <p className="text-green-800 text-sm font-medium">✓ Connected (Demo)</p>
                     {getAccountInfo('facebook')?.profileData?.name && (
                       <p className="text-green-600 text-sm">
                         {getAccountInfo('facebook')?.profileData?.name}
@@ -223,11 +445,11 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <button
-                  onClick={() => connectSocialAccount('facebook')}
+                  onClick={() => connectMockSocialAccount('facebook')}
                   disabled={connecting === 'facebook'}
                   className="w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50 transition-colors"
                 >
-                  {connecting === 'facebook' ? 'Connecting...' : 'Connect Facebook'}
+                  {connecting === 'facebook' ? 'Connecting...' : 'Connect Facebook (Demo)'}
                 </button>
               )}
             </div>
