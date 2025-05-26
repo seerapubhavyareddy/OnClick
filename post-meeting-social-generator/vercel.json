@@ -1,3 +1,29 @@
 {
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "functions": {
+    "src/app/api/**/*.ts": {
+      "maxDuration": 30
+    },
+    "pages/api/**/*.ts": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/google/callback",
+      "destination": "/api/google/callback"
+    },
+    {
+      "source": "/api/auth/callback/google",
+      "destination": "/api/auth/callback/google"
+    },
+    {
+      "source": "/api/auth/callback/linkedin",
+      "destination": "/api/auth/callback/linkedin"
+    }
+  ],
+  "env": {
+    "NEXTAUTH_URL": "${VERCEL_URL}"
+  },
+  "buildCommand": "prisma generate && next build"
 }

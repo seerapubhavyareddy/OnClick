@@ -1,33 +1,45 @@
-// lib/prisma.ts - EMERGENCY FIX for Supabase connection issues
+// lib/prisma.ts
 import { PrismaClient } from '@prisma/client'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-// EMERGENCY: Single connection configuration for Supabase
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({
-  log: ['error'],
-  // Remove datasources configuration to prevent connection issues
-})
+// Configure Prisma with reliable connection settings
+const prismaClientSingleton = () => {
+  return new PrismaClient({
+    log: ['error', 'warn'],
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL
+      }
+    },
+    // Add connection timeout and pool settings
+    // especially important for serverless environments
+    // to prevent exhausting connections
+    // connectionLimit: 1
+  })
+}
 
-// Only store in global during development
+export const prisma = globalForPrisma.prisma ?? prismaClientSingleton()
+
+// Only store prisma in global object during development
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma
 }
 
-// Ensure cleanup
-const cleanup = async () => {
-  try {
-    await prisma.$disconnect()
-    console.log('🔌 Prisma disconnected')
-  } catch (error) {
-    console.error('Error disconnecting Prisma:', error)
-  }
-}
+// Handle prisma shutdown
+process.on('beforeExit', async () => {
+  await prisma.$disconnect()
+})
 
-// Handle process termination
-process.on('beforeExit', cleanup)
-process.on('SIGINT', cleanup)
-process.on('SIGTERM', cleanup)
-process.on('SIGHUP', cleanup)
+// Handle unexpected termination
+process.on('SIGINT', async () => {
+  await prisma.$disconnect()
+  process.exit(0)
+})
+
+process.on('SIGTERM', async () => {
+  await prisma.$disconnect()
+  process.exit(0)
+})

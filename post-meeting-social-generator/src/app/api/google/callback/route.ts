@@ -1,4 +1,4 @@
-// src/app/api/google/callback/route.ts - CREATE THIS FILE
+// src/app/api/google/callback/route.ts
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
@@ -13,35 +13,45 @@ export async function GET(request: NextRequest) {
     const state = searchParams.get('state')
     const error = searchParams.get('error')
 
+    // Parse state to get user info and redirect URL
+    let stateData
+    let redirectBase = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+    
+    try {
+      if (state) {
+        stateData = JSON.parse(state)
+        // Use the redirectUrl from state if available
+        if (stateData.redirectUrl) {
+          redirectBase = stateData.redirectUrl
+        }
+      }
+    } catch (parseError) {
+      console.error('Invalid state parameter:', parseError)
+      return NextResponse.redirect(`${redirectBase}/settings?error=invalid_state`)
+    }
+
+    console.log(`🔄 Google callback processing with redirect base: ${redirectBase}`)
+
     if (error) {
       console.error('Google OAuth error:', error)
-      return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/settings?error=oauth_failed`)
+      return NextResponse.redirect(`${redirectBase}/settings?error=oauth_failed`)
     }
 
     if (!code || !state) {
-      return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/settings?error=missing_params`)
+      return NextResponse.redirect(`${redirectBase}/settings?error=missing_params`)
     }
 
-    // Parse state to get user info
-    let stateData
-    try {
-      stateData = JSON.parse(state)
-    } catch {
-      console.error('Invalid state parameter')
-      return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/settings?error=invalid_state`)
-    }
-
-    const { userId, action } = stateData
+    const { userId, action } = stateData || {}
 
     if (action !== 'add_account' || !userId) {
-      return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/settings?error=invalid_request`)
+      return NextResponse.redirect(`${redirectBase}/settings?error=invalid_request`)
     }
 
     // Exchange code for tokens
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      `${process.env.NEXTAUTH_URL}/api/google/callback`
+      `${redirectBase}/api/google/callback`
     )
 
     const { tokens } = await oauth2Client.getToken(code)
@@ -52,8 +62,10 @@ export async function GET(request: NextRequest) {
     const { data: userInfo } = await oauth2.userinfo.get()
 
     if (!userInfo.email) {
-      return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/settings?error=no_email`)
+      return NextResponse.redirect(`${redirectBase}/settings?error=no_email`)
     }
+
+    console.log(`🔍 Google account info retrieved for: ${userInfo.email}`)
 
     // Add the additional Google account
     await multipleAccountCalendarService.addGoogleAccount(userId, {
@@ -68,10 +80,12 @@ export async function GET(request: NextRequest) {
 
     console.log(`✅ Additional Google account added: ${userInfo.email}`)
 
-    return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/settings?connected=google&email=${encodeURIComponent(userInfo.email)}`)
+    return NextResponse.redirect(`${redirectBase}/settings?connected=google&email=${encodeURIComponent(userInfo.email)}`)
 
   } catch (error) {
     console.error('Error in Google callback:', error)
-    return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/settings?error=callback_failed`)
+    // Fallback to NEXTAUTH_URL if everything else fails
+    const fallbackUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+    return NextResponse.redirect(`${fallbackUrl}/settings?error=callback_failed&message=${encodeURIComponent(error instanceof Error ? error.message : 'Unknown error')}`)
   }
 }

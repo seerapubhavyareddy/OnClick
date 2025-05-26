@@ -1,4 +1,4 @@
-// src/app/api/google/add-account/route.ts - CREATE THIS FILE
+// src/app/api/google/add-account/route.ts
 export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -23,11 +23,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
+    // Determine the base URL correctly
+    const baseUrl = process.env.NEXTAUTH_URL || 
+                   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 
+                   'http://localhost:3000')
+    
+    console.log(`🔄 Creating Google auth URL with base: ${baseUrl}`)
+
     // Create OAuth2 client for additional account
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      `${process.env.NEXTAUTH_URL}/api/google/callback`
+      `${baseUrl}/api/google/callback`
     )
 
     // Generate authorization URL for additional account
@@ -42,7 +49,8 @@ export async function POST(request: NextRequest) {
       prompt: 'consent',
       state: JSON.stringify({ 
         userId: user.id,
-        action: 'add_account'
+        action: 'add_account',
+        redirectUrl: baseUrl // Store the redirect URL in state
       })
     })
 
@@ -54,6 +62,9 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Error generating Google auth URL:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ 
+      error: 'Internal server error', 
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 })
   }
 }
