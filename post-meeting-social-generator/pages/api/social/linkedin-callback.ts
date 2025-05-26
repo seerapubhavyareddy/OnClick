@@ -10,17 +10,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     console.log('🟦 LinkedIn callback received')
     console.log('🟦 Query params:', req.query)
+    console.log('🟦 Environment:', process.env.NODE_ENV)
+    console.log('🟦 NEXTAUTH_URL:', process.env.NEXTAUTH_URL)
+    console.log('🟦 VERCEL_URL:', process.env.VERCEL_URL)
+
+    // Import URL helper
+    const { getBaseUrl, getLinkedInCallbackUrl } = await import('../../../lib/url-helper')
+    const baseUrl = getBaseUrl()
+    const callbackUrl = getLinkedInCallbackUrl()
 
     const { code, state, error } = req.query
 
     if (error) {
       console.error('🟦 LinkedIn OAuth error:', error)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=linkedin_failed&details=${encodeURIComponent(error as string)}`)
+      return res.redirect(`${baseUrl}/settings?error=linkedin_failed&details=${encodeURIComponent(error as string)}`)
     }
 
     if (!code || !state) {
       console.error('🟦 Missing code or state')
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=missing_params`)
+      return res.redirect(`${baseUrl}/settings?error=missing_params`)
     }
 
     // Parse state
@@ -30,14 +38,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log('🟦 Parsed state:', stateData)
     } catch (parseError) {
       console.error('🟦 Invalid state JSON:', state)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=invalid_state`)
+      return res.redirect(`${baseUrl}/settings?error=invalid_state`)
     }
 
     const { userId, action, platform } = stateData
 
     if (action !== 'connect_social' || platform !== 'linkedin' || !userId) {
       console.error('🟦 Invalid state data:', stateData)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=invalid_request`)
+      return res.redirect(`${baseUrl}/settings?error=invalid_request`)
     }
 
     // Verify user exists
@@ -47,7 +55,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (!user) {
       console.error('🟦 User not found:', userId)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=user_not_found`)
+      return res.redirect(`${baseUrl}/settings?error=user_not_found`)
     }
 
     console.log('🟦 Exchanging code for tokens...')
@@ -62,7 +70,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code as string,
-        redirect_uri: `${process.env.NEXTAUTH_URL}/api/social/linkedin-callback`,
+        redirect_uri: callbackUrl, // Use the helper function
         client_id: process.env.LINKEDIN_CLIENT_ID!,
         client_secret: process.env.LINKEDIN_CLIENT_SECRET!,
       }),
@@ -71,7 +79,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text()
       console.error('🟦 LinkedIn token error:', tokenResponse.status, errorText)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=token_failed&status=${tokenResponse.status}`)
+      return res.redirect(`${baseUrl}/settings?error=token_failed&status=${tokenResponse.status}`)
     }
 
     const tokens = await tokenResponse.json()
@@ -92,7 +100,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!userResponse.ok) {
       const errorText = await userResponse.text()
       console.error('🟦 LinkedIn userinfo error:', userResponse.status, errorText)
-      return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=userinfo_failed&status=${userResponse.status}`)
+      return res.redirect(`${baseUrl}/settings?error=userinfo_failed&status=${userResponse.status}`)
     }
 
     const linkedinUser = await userResponse.json()
@@ -148,10 +156,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log('✅ Social account ID:', socialAccount.id)
 
     // Redirect to settings with success
-    return res.redirect(`${process.env.NEXTAUTH_URL}/settings?connected=linkedin&email=${encodeURIComponent(linkedinUser.email)}`)
+    return res.redirect(`${baseUrl}/settings?connected=linkedin&email=${encodeURIComponent(linkedinUser.email)}`)
 
   } catch (error) {
     console.error('❌ LinkedIn callback error:', error)
-    return res.redirect(`${process.env.NEXTAUTH_URL}/settings?error=callback_failed`)
+    
+    // Import URL helper for error redirect
+    const { getBaseUrl } = await import('../../../lib/url-helper')
+    const baseUrl = getBaseUrl()
+    
+    return res.redirect(`${baseUrl}/settings?error=callback_failed`)
   }
 }

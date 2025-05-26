@@ -22,15 +22,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: 'User not found' })
       }
 
-      // Generate LinkedIn OAuth URL for connection (SEPARATE from NextAuth)
-      const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+      // Import the URL helper
+      const { getBaseUrl, getLinkedInCallbackUrl, logUrlInfo } = await import('../../../lib/url-helper')
       
-      console.log(`🔗 Using base URL for LinkedIn: ${baseUrl}`)
+      // Log URL info for debugging
+      logUrlInfo()
       
+      const baseUrl = getBaseUrl()
+      const redirectUri = getLinkedInCallbackUrl()
       const clientId = process.env.LINKEDIN_CLIENT_ID!
       
-      // Use CUSTOM callback URL (not NextAuth's)
-      const redirectUri = `${baseUrl}/api/social/linkedin-callback`
+      console.log(`🔗 LinkedIn OAuth setup:`, {
+        baseUrl,
+        redirectUri,
+        environment: process.env.NODE_ENV
+      })
       
       const state = JSON.stringify({
         action: 'connect_social',
